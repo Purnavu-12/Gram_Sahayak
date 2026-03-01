@@ -38,3 +38,15 @@ coverage/
 # Temporary files
 *.tmp
 .cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+
+# Database (root level only, allow public/schemes.db)
+/schemes.db

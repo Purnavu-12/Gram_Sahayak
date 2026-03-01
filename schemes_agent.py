@@ -23,11 +23,21 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-DB_PATH = Path(__file__).parent / "schemes.db"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_PATH = Path(__file__).parent / os.getenv("DB_PATH", "schemes.db")
 API_BASE = "https://api.myscheme.gov.in/search/v6/schemes"
-API_KEY = "tYTy5eEhlu9rFjyxuCr7ra7ACp4dv1RH8gWuHTDc"
+API_KEY = os.getenv("MYSCHEME_API_KEY", "")
+if not API_KEY:
+    raise ValueError(
+        "MYSCHEME_API_KEY environment variable is required. "
+        "Copy .env.example to .env and add your API key."
+    )
 PAGE_SIZE = 100                # max items per API call
-SYNC_INTERVAL_SECONDS = 3600   # 1 hour
+SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_HOURS", "1")) * 3600
 REQUEST_TIMEOUT = 30           # seconds per HTTP request
 RETRY_ATTEMPTS = 3
 RETRY_DELAY = 5                # seconds between retries
