@@ -13,6 +13,7 @@ let initPromise: Promise<void> | null = null;
 /**
  * Initialize the SQLite database
  * Loads the schemes.db file from the public directory
+ * Uses local WASM file for offline support
  */
 export async function initDatabase(): Promise<void> {
   if (initPromise) {
@@ -21,9 +22,9 @@ export async function initDatabase(): Promise<void> {
 
   initPromise = (async () => {
     try {
-      // Initialize sql.js
+      // Initialize sql.js with local WASM file
       const SQL = await initSqlJs({
-        locateFile: (file) => `https://sql.js.org/dist/${file}`
+        locateFile: (file: string) => `/${file}`
       });
 
       // Fetch the database file
@@ -38,6 +39,8 @@ export async function initDatabase(): Promise<void> {
       console.log('✅ Database initialized successfully');
     } catch (error) {
       console.error('❌ Failed to initialize database:', error);
+      // Reset initPromise to allow retry
+      initPromise = null;
       throw error;
     }
   })();

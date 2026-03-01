@@ -13,13 +13,27 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
   const [isListening, setIsListening] = useState(false);
   const { t } = useLanguage();
 
-  const handleClick = () => {
+  const handleClick = async () => {
     if (isListening) {
       setIsListening(false);
       onStopListening?.();
     } else {
-      setIsListening(true);
-      onStartListening?.();
+      // Request microphone permission
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+
+        setIsListening(true);
+        onStartListening?.();
+
+        // TODO: Integrate with LiveKit service
+        // const livekitService = getLivekitService();
+        // await livekitService.connect({ url: LIVEKIT_URL, token: LIVEKIT_TOKEN });
+        // await livekitService.enableMicrophone();
+      } catch (error) {
+        console.error('Microphone permission denied:', error);
+        alert(t('errors.micPermission'));
+      }
     }
   };
 
@@ -38,6 +52,7 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
           active:scale-95
         `}
         aria-label={isListening ? t('listening') : t('tapMicToSpeak')}
+        aria-pressed={isListening}
       >
         <svg
           className="w-12 h-12 md:w-16 md:h-16 mx-auto text-white"
