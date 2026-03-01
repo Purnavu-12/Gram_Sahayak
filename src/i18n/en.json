@@ -20,9 +20,30 @@
   "income": "Income Category",
   "familySize": "Family Size",
   "category": "Category",
+  "description": "Discover government schemes you're eligible for through simple voice conversation. No reading, no forms - just speak naturally in your language.",
+  "schemesAvailable": "schemes available",
+  "central": "Central",
+  "stateUT": "State/UT",
+  "searchPlaceholder": "Search schemes (e.g., farmer, health, education)...",
+  "searching": "Searching...",
+  "search": "Search",
+  "voiceFirst": "Voice First",
+  "voiceFirstDesc": "Speak naturally in Hindi or English",
+  "smartMatching": "Smart Matching",
+  "smartMatchingDesc": "Find schemes that match your profile",
+  "simpleAccessible": "Simple & Accessible",
+  "simpleAccessibleDesc": "Built for low-literacy users",
+  "searchResults": "Search Results",
+  "loadingSchemes": "Loading schemes...",
+  "noSchemesFound": "No schemes found matching your search. Try different keywords.",
+  "showing": "Showing",
+  "of": "of",
+  "browseAll": "Browse All Schemes",
+  "viewAll": "View All",
   "errors": {
     "micPermission": "We need microphone access to help you. Please allow microphone access.",
     "connectionFailed": "Unable to connect. Please check your internet connection.",
-    "tryAgain": "Try Again"
+    "tryAgain": "Try Again",
+    "databaseLoadFailed": "Failed to load schemes database. Please refresh the page."
   }
 }

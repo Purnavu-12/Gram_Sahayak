@@ -94,12 +94,11 @@ const Home: React.FC = () => {
             {t('welcomeSubtitle')}
           </p>
           <p className="mt-4 text-text-secondary max-w-2xl mx-auto">
-            Discover government schemes you're eligible for through simple voice conversation.
-            No reading, no forms - just speak naturally in your language.
+            {t('description')}
           </p>
           {dbStats.total > 0 && (
             <p className="mt-3 text-sm text-primary font-semibold">
-              {dbStats.total} schemes available ({dbStats.central} Central, {dbStats.state} State/UT)
+              {dbStats.total} {t('schemesAvailable')} ({dbStats.central} {t('central')}, {dbStats.state} {t('stateUT')})
             </p>
           )}
         </div>
@@ -114,7 +113,7 @@ const Home: React.FC = () => {
           <div className="flex gap-2">
             <input
               type="text"
-              placeholder="Search schemes (e.g., farmer, health, education)..."
+              placeholder={t('searchPlaceholder')}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -125,7 +124,7 @@ const Home: React.FC = () => {
               className="btn-primary px-6"
               disabled={loading}
             >
-              {loading ? 'Searching...' : 'Search'}
+              {loading ? t('searching') : t('search')}
             </button>
           </div>
         </div>
@@ -134,23 +133,23 @@ const Home: React.FC = () => {
         <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl">
           <div className="card text-center">
             <div className="text-4xl mb-3">🎤</div>
-            <h3 className="font-semibold mb-2">Voice First</h3>
+            <h3 className="font-semibold mb-2">{t('voiceFirst')}</h3>
             <p className="text-sm text-text-secondary">
-              Speak naturally in Hindi or English
+              {t('voiceFirstDesc')}
             </p>
           </div>
           <div className="card text-center">
             <div className="text-4xl mb-3">🎯</div>
-            <h3 className="font-semibold mb-2">Smart Matching</h3>
+            <h3 className="font-semibold mb-2">{t('smartMatching')}</h3>
             <p className="text-sm text-text-secondary">
-              Find schemes that match your profile
+              {t('smartMatchingDesc')}
             </p>
           </div>
           <div className="card text-center">
             <div className="text-4xl mb-3">📱</div>
-            <h3 className="font-semibold mb-2">Simple & Accessible</h3>
+            <h3 className="font-semibold mb-2">{t('simpleAccessible')}</h3>
             <p className="text-sm text-text-secondary">
-              Built for low-literacy users
+              {t('simpleAccessibleDesc')}
             </p>
           </div>
         </div>
@@ -161,18 +160,18 @@ const Home: React.FC = () => {
         <section className="py-12 px-4 bg-surface">
           <div className="container mx-auto max-w-6xl">
             <h2 className="text-3xl font-bold text-center mb-8">
-              {searchQuery ? `Search Results (${displaySchemes.length})` : t('eligibleSchemes')}
+              {searchQuery ? `${t('searchResults')} (${displaySchemes.length})` : t('eligibleSchemes')}
             </h2>
 
             {loading ? (
               <div className="text-center py-12">
                 <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-                <p className="mt-4 text-text-secondary">Loading schemes...</p>
+                <p className="mt-4 text-text-secondary">{t('loadingSchemes')}</p>
               </div>
             ) : displaySchemes.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-xl text-text-secondary">
-                  {searchQuery ? 'No schemes found matching your search. Try different keywords.' : 'Loading schemes...'}
+                  {searchQuery ? t('noSchemesFound') : t('loadingSchemes')}
                 </p>
               </div>
             ) : (
@@ -190,13 +189,13 @@ const Home: React.FC = () => {
                 {!searchQuery && dbStats.total > displaySchemes.length && (
                   <div className="text-center mt-8">
                     <p className="text-text-secondary mb-4">
-                      Showing {displaySchemes.length} of {dbStats.total} schemes
+                      {t('showing')} {displaySchemes.length} {t('of')} {dbStats.total} {t('schemesAvailable')}
                     </p>
                     <button
                       className="btn-primary"
                       onClick={() => setSearchQuery(' ')}
                     >
-                      Browse All Schemes
+                      {t('browseAll')}
                     </button>
                   </div>
                 )}
