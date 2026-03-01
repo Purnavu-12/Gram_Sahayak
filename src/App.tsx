@@ -1,0 +1,21 @@
+import React from 'react';
+import { LanguageProvider } from './components/LanguageProvider';
+import Header from './components/layout/Header';
+import Footer from './components/layout/Footer';
+import Home from './pages/Home';
+
+const App: React.FC = () => {
+  return (
+    <LanguageProvider>
+      <div className="flex flex-col min-h-screen">
+        <Header />
+        <main className="flex-1">
+          <Home />
+        </main>
+        <Footer />
+      </div>
+    </LanguageProvider>
+  );
+};
+
+export default App;

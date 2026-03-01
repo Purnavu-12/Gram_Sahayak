@@ -1,0 +1,28 @@
+{
+  "welcome": "Welcome to Gram Sahayak",
+  "welcomeSubtitle": "Your Digital Assistant for Government Schemes",
+  "startConversation": "Start Voice Conversation",
+  "tapMicToSpeak": "Tap the microphone to speak",
+  "listening": "Listening...",
+  "processing": "Processing...",
+  "speaking": "Speaking...",
+  "schemes": "Government Schemes",
+  "eligibleSchemes": "Schemes You May Be Eligible For",
+  "profile": "Your Profile",
+  "age": "Age",
+  "gender": "Gender",
+  "male": "Male",
+  "female": "Female",
+  "other": "Other",
+  "state": "State",
+  "district": "District",
+  "occupation": "Occupation",
+  "income": "Income Category",
+  "familySize": "Family Size",
+  "category": "Category",
+  "errors": {
+    "micPermission": "We need microphone access to help you. Please allow microphone access.",
+    "connectionFailed": "Unable to connect. Please check your internet connection.",
+    "tryAgain": "Try Again"
+  }
+}

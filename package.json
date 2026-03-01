@@ -1,0 +1,38 @@
+{
+  "name": "gram_sahayak",
+  "version": "1.0.0",
+  "description": "Gram Sahayak - Rural Digital Assistance Platform for Government Schemes",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Purnavu-12/Gram_Sahayak.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Purnavu-12/Gram_Sahayak/issues"
+  },
+  "homepage": "https://github.com/Purnavu-12/Gram_Sahayak#readme",
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.19",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "livekit-client": "^2.17.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}
