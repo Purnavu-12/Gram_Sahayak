@@ -3,8 +3,10 @@ import { useLanguage } from '../components/LanguageProvider';
 import VoiceButton from '../components/common/VoiceButton';
 import SchemeCard from '../components/common/SchemeCard';
 import SchemeDetailsModal from '../components/features/SchemeDetailsModal';
-import { initDatabase, getFeaturedSchemes, searchSchemes, getDbStats } from '../services/schemeData';
+import { initDatabase, getFeaturedSchemes, searchSchemes, getDbStats, getAllCategories, getAllStates } from '../services/schemeData';
 import { Scheme } from '../types';
+
+const ITEMS_PER_PAGE = 12;
 
 const Home: React.FC = () => {
   const { t } = useLanguage();
@@ -14,6 +16,16 @@ const Home: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [dbStats, setDbStats] = useState({ total: 0, central: 0, state: 0 });
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [allSchemes, setAllSchemes] = useState<Scheme[]>([]);
+
+  // Filters
+  const [selectedState, setSelectedState] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedLevel, setSelectedLevel] = useState('');
+  const [availableStates, setAvailableStates] = useState<string[]>([]);
+  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
 
   // Initialize database on component mount
   useEffect(() => {
@@ -25,6 +37,14 @@ const Home: React.FC = () => {
         // Get database statistics
         const stats = await getDbStats();
         setDbStats(stats);
+
+        // Load filter options
+        const [states, categories] = await Promise.all([
+          getAllStates(),
+          getAllCategories()
+        ]);
+        setAvailableStates(states);
+        setAvailableCategories(categories);
 
         // Load featured schemes
         const featured = await getFeaturedSchemes(6);
@@ -63,24 +83,56 @@ const Home: React.FC = () => {
   };
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      // If empty search, reload featured schemes
-      const featured = await getFeaturedSchemes(6);
-      setDisplaySchemes(featured);
-      return;
-    }
-
     setLoading(true);
+    setCurrentPage(1);
+
     try {
-      const results = await searchSchemes(searchQuery, {}, 12);
-      setDisplaySchemes(results);
+      const filters: { state?: string; category?: string; level?: string } = {};
+      if (selectedState) filters.state = selectedState;
+      if (selectedCategory) filters.category = selectedCategory;
+      if (selectedLevel) filters.level = selectedLevel;
+
+      const limit = 100; // Get more results for pagination
+      const results = await searchSchemes(searchQuery || '', filters, limit);
+      setAllSchemes(results);
+      setDisplaySchemes(results.slice(0, ITEMS_PER_PAGE));
+      setHasMore(results.length > ITEMS_PER_PAGE);
       setShowSchemes(true);
     } catch (error) {
       console.error('Search failed:', error);
+      setAllSchemes([]);
+      setDisplaySchemes([]);
+      setHasMore(false);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleLoadMore = () => {
+    const nextPage = currentPage + 1;
+    const startIndex = nextPage * ITEMS_PER_PAGE;
+    const endIndex = startIndex + ITEMS_PER_PAGE;
+    const newSchemes = allSchemes.slice(0, endIndex);
+
+    setDisplaySchemes(newSchemes);
+    setCurrentPage(nextPage);
+    setHasMore(endIndex < allSchemes.length);
+  };
+
+  const handleClearFilters = () => {
+    setSelectedState('');
+    setSelectedCategory('');
+    setSelectedLevel('');
+    setSearchQuery('');
+  };
+
+  // Trigger search when filters change
+  useEffect(() => {
+    if (selectedState || selectedCategory || selectedLevel) {
+      handleSearch();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedState, selectedCategory, selectedLevel]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -126,6 +178,56 @@ const Home: React.FC = () => {
             >
               {loading ? t('searching') : t('search')}
             </button>
+          </div>
+
+          {/* Filters */}
+          <div className="mt-4 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* State Filter */}
+              <select
+                value={selectedState}
+                onChange={(e) => setSelectedState(e.target.value)}
+                className="px-4 py-2 rounded-lg border-2 border-gray-300 focus:border-primary focus:outline-none"
+              >
+                <option value="">{t('allStates')}</option>
+                {availableStates.map(state => (
+                  <option key={state} value={state}>{state}</option>
+                ))}
+              </select>
+
+              {/* Category Filter */}
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="px-4 py-2 rounded-lg border-2 border-gray-300 focus:border-primary focus:outline-none"
+              >
+                <option value="">{t('allCategories')}</option>
+                {availableCategories.map(category => (
+                  <option key={category} value={category}>{category}</option>
+                ))}
+              </select>
+
+              {/* Level Filter */}
+              <select
+                value={selectedLevel}
+                onChange={(e) => setSelectedLevel(e.target.value)}
+                className="px-4 py-2 rounded-lg border-2 border-gray-300 focus:border-primary focus:outline-none"
+              >
+                <option value="">{t('allLevels')}</option>
+                <option value="Central">{t('centralSchemes')}</option>
+                <option value="State">{t('stateSchemes')}</option>
+              </select>
+            </div>
+
+            {/* Clear Filters Button */}
+            {(selectedState || selectedCategory || selectedLevel || searchQuery) && (
+              <button
+                onClick={handleClearFilters}
+                className="text-sm text-primary hover:text-primary-dark underline"
+              >
+                {t('clearFilters')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -186,17 +288,24 @@ const Home: React.FC = () => {
                     />
                   ))}
                 </div>
-                {!searchQuery && dbStats.total > displaySchemes.length && (
+                {hasMore && (
                   <div className="text-center mt-8">
                     <p className="text-text-secondary mb-4">
-                      {t('showing')} {displaySchemes.length} {t('of')} {dbStats.total} {t('schemesAvailable')}
+                      {t('showing')} {displaySchemes.length} {t('of')} {allSchemes.length}
                     </p>
                     <button
-                      className="btn-primary"
-                      onClick={() => setSearchQuery(' ')}
+                      className="btn-primary px-8 py-3"
+                      onClick={handleLoadMore}
                     >
-                      {t('browseAll')}
+                      {t('loadMore')}
                     </button>
+                  </div>
+                )}
+                {!hasMore && allSchemes.length > ITEMS_PER_PAGE && (
+                  <div className="text-center mt-8">
+                    <p className="text-text-secondary">
+                      {t('noMoreSchemes')}
+                    </p>
                   </div>
                 )}
               </>
