@@ -88,9 +88,6 @@ cp .env.example .env
 Edit `.env`:
 
 ```bash
-# MyScheme.gov.in API Key
-MYSCHEME_API_KEY=your_api_key_here
-
 # LiveKit Configuration
 LIVEKIT_URL=wss://your-livekit-server.com
 LIVEKIT_API_KEY=your_livekit_api_key
@@ -98,11 +95,15 @@ LIVEKIT_API_SECRET=your_livekit_api_secret
 
 # Google AI API Key (for Gemini)
 GOOGLE_API_KEY=your_google_api_key
+
+# Optional: MyScheme.gov.in API Key (only needed for database sync)
+# The voice agent uses DuckDuckGo webscraping for real-time scheme details
+MYSCHEME_API_KEY=your_api_key_here
 ```
 
-### 3. Initialize/Update Schemes Database
+### 3. Initialize/Update Schemes Database (Optional)
 
-The database syncs schemes from myscheme.gov.in API:
+The database can be synced from myscheme.gov.in API (requires API key):
 
 ```bash
 # Run once to sync database
@@ -125,8 +126,10 @@ The voice agent will:
 - Connect to your LiveKit server
 - Use Google Gemini for natural language understanding
 - Search schemes in the local SQLite database
-- Use DuckDuckGo to fetch latest scheme details from the web
+- **Use DuckDuckGo webscraping** to fetch latest scheme details from the web (no API key required)
 - Maintain conversation context per user session
+
+**Note**: The voice agent does NOT require myscheme.gov.in API key for operation. It uses DuckDuckGo search to scrape real-time scheme information directly from the web.
 
 ## 🛠️ Tech Stack
 
@@ -148,10 +151,10 @@ The voice agent will:
 - **Conversation Memory**: In-memory SQLite per session
 - **Noise Cancellation**: LiveKit BVC/Telephony plugins
 
-### Data Source
-- **Primary**: myscheme.gov.in API (700+ schemes)
-- **Sync**: Automated hourly sync via schemes_agent.py
-- **Fallback**: DuckDuckGo web search for latest updates
+### Data Sources
+- **Database**: Pre-built SQLite database with 700+ schemes (can be synced from myscheme.gov.in API if you have an API key)
+- **Real-time Updates**: DuckDuckGo webscraping for latest scheme information (no API key needed)
+- **Voice Agent**: Uses DuckDuckGo exclusively for up-to-date scheme details
 
 ## 📁 Project Structure
 
@@ -353,7 +356,7 @@ Contributions are welcome! Please follow these steps:
 
 See `.env.example` for a complete list. Key variables:
 
-- `MYSCHEME_API_KEY` - API key for myscheme.gov.in (get from their website)
+- `MYSCHEME_API_KEY` - (Optional) API key for myscheme.gov.in database sync. Not needed for voice agent operation, which uses DuckDuckGo webscraping instead.
 - `LIVEKIT_URL` - Your LiveKit server URL
 - `LIVEKIT_API_KEY` - LiveKit API key
 - `LIVEKIT_API_SECRET` - LiveKit API secret
