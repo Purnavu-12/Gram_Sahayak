@@ -38,24 +38,28 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
   };
 
   return (
-    <div className="flex flex-col items-center space-y-4">
+    <div className="flex flex-col items-center space-y-6">
       <button
         onClick={handleClick}
         className={`
-          relative w-24 h-24 md:w-32 md:h-32 rounded-full
-          transition-all duration-300 transform
+          relative w-32 h-32 md:w-40 md:h-40 rounded-full
+          transition-all duration-500 transform
           ${isListening
-            ? 'bg-error scale-110 animate-pulse shadow-2xl'
-            : 'bg-primary hover:bg-primary-dark hover:scale-105 shadow-xl'
+            ? 'bg-gradient-to-br from-error to-red-600 scale-110 shadow-glow-lg'
+            : 'bg-gradient-to-br from-primary via-primary-dark to-secondary hover:scale-105 shadow-large hover:shadow-glow'
           }
           focus:outline-none focus:ring-4 focus:ring-primary/50
-          active:scale-95
+          active:scale-95 overflow-hidden
         `}
         aria-label={isListening ? t('listening') : t('tapMicToSpeak')}
         aria-pressed={isListening}
       >
+        {/* Animated gradient overlay */}
+        <div className={`absolute inset-0 bg-gradient-to-tr from-white/20 to-transparent ${isListening ? 'animate-pulse' : ''}`}></div>
+
+        {/* Microphone icon */}
         <svg
-          className="w-12 h-12 md:w-16 md:h-16 mx-auto text-white"
+          className="w-16 h-16 md:w-20 md:h-20 mx-auto text-white relative z-10"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -68,14 +72,36 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
           />
         </svg>
 
+        {/* Pulse rings for listening state */}
         {isListening && (
-          <span className="absolute inset-0 rounded-full bg-error animate-ping opacity-20" />
+          <>
+            <span className="absolute inset-0 rounded-full bg-error animate-ping opacity-20" />
+            <span className="absolute inset-0 rounded-full bg-error animate-pulse opacity-30" />
+          </>
+        )}
+
+        {/* Floating particles effect */}
+        {!isListening && (
+          <div className="absolute inset-0 overflow-hidden rounded-full">
+            <div className="absolute w-2 h-2 bg-white/40 rounded-full top-1/4 left-1/4 animate-float"></div>
+            <div className="absolute w-1.5 h-1.5 bg-white/30 rounded-full top-1/2 right-1/4 animate-float" style={{ animationDelay: '1s' }}></div>
+            <div className="absolute w-2.5 h-2.5 bg-white/20 rounded-full bottom-1/4 left-1/3 animate-float" style={{ animationDelay: '2s' }}></div>
+          </div>
         )}
       </button>
 
-      <p className="text-center font-medium text-lg">
-        {isListening ? t('listening') : t('tapMicToSpeak')}
-      </p>
+      <div className="text-center">
+        <p className={`font-bold text-xl md:text-2xl transition-all duration-300 ${
+          isListening ? 'text-error animate-pulse' : 'text-primary'
+        }`}>
+          {isListening ? t('listening') : t('tapMicToSpeak')}
+        </p>
+        {!isListening && (
+          <p className="text-text-secondary text-sm mt-2 max-w-xs">
+            Tap the microphone to start your voice conversation
+          </p>
+        )}
+      </div>
     </div>
   );
 };

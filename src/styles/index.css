@@ -10,42 +10,115 @@
   body {
     @apply bg-background text-text-primary font-sans min-h-screen;
     font-size: 16px;
-    line-height: 1.5;
+    line-height: 1.6;
   }
 
   h1 {
-    @apply text-4xl font-bold;
+    @apply text-4xl md:text-5xl font-bold;
+    letter-spacing: -0.025em;
   }
 
   h2 {
-    @apply text-2xl font-semibold;
+    @apply text-3xl md:text-4xl font-bold;
+    letter-spacing: -0.02em;
   }
 
   h3 {
-    @apply text-xl font-semibold;
+    @apply text-xl md:text-2xl font-semibold;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply bg-primary hover:bg-primary-dark text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 ease-in-out;
+    @apply bg-gradient-to-r from-primary to-primary-dark text-white font-semibold py-3 px-8 rounded-xl;
+    @apply transition-all duration-300 ease-in-out transform hover:scale-105;
     @apply active:scale-95 focus:outline-none focus:ring-4 focus:ring-primary/30;
-    min-height: 44px;
+    @apply shadow-medium hover:shadow-large;
+    min-height: 48px;
   }
 
   .btn-secondary {
-    @apply bg-secondary hover:bg-secondary-dark text-white font-semibold py-3 px-6 rounded-lg transition-all duration-300 ease-in-out;
+    @apply bg-gradient-to-r from-secondary to-secondary-dark text-white font-semibold py-3 px-8 rounded-xl;
+    @apply transition-all duration-300 ease-in-out transform hover:scale-105;
     @apply active:scale-95 focus:outline-none focus:ring-4 focus:ring-secondary/30;
-    min-height: 44px;
+    @apply shadow-medium hover:shadow-large;
+    min-height: 48px;
+  }
+
+  .btn-outline {
+    @apply border-2 border-primary text-primary font-semibold py-3 px-8 rounded-xl;
+    @apply transition-all duration-300 ease-in-out hover:bg-primary hover:text-white;
+    @apply active:scale-95 focus:outline-none focus:ring-4 focus:ring-primary/30;
+    min-height: 48px;
   }
 
   .card {
-    @apply bg-surface rounded-2xl shadow-lg p-6 transition-all duration-300;
+    @apply bg-surface rounded-2xl shadow-soft p-6 transition-all duration-300;
+    @apply hover:shadow-medium border border-border/50;
+  }
+
+  .card-gradient {
+    @apply relative overflow-hidden rounded-2xl p-6 transition-all duration-300;
+    @apply shadow-medium hover:shadow-large;
+  }
+
+  .card-gradient::before {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-br from-primary/5 to-secondary/5;
+    @apply opacity-0 transition-opacity duration-300;
+  }
+
+  .card-gradient:hover::before {
+    @apply opacity-100;
   }
 
   .input-field {
-    @apply w-full px-4 py-3 border-2 border-border rounded-lg focus:border-primary focus:outline-none;
-    @apply text-base transition-all duration-200;
-    min-height: 44px;
+    @apply w-full px-4 py-3 border-2 border-border rounded-xl;
+    @apply focus:border-primary focus:ring-4 focus:ring-primary/10 focus:outline-none;
+    @apply text-base transition-all duration-200 bg-surface;
+    min-height: 48px;
   }
+
+  .skeleton {
+    @apply animate-pulse bg-border/50 rounded;
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary via-secondary to-primary;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+/* Custom animations */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+  background: linear-gradient(to right, #f0f0f0 4%, #e0e0e0 25%, #f0f0f0 36%);
+  background-size: 1000px 100%;
 }
