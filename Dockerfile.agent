@@ -1,0 +1,12 @@
+# LiveKit Voice Agent
+FROM python:3.11-slim
+WORKDIR /app
+
+# Install Python deps
+COPY requirements-agent.txt ./
+RUN pip install --no-cache-dir -r requirements-agent.txt
+
+# Copy application code
+COPY agent.py scheme_lookup.py schemes.db ./
+
+CMD ["python", "agent.py", "start"]

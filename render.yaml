@@ -1,0 +1,39 @@
+# Render Blueprint — one-click deploy for Gram Sahayak
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Deploy: Connect your GitHub repo on Render and it will auto-detect this file.
+
+services:
+  # 1. Web Service — Token Server + React Frontend
+  - type: web
+    name: gram-sahayak-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    envVars:
+      - key: PORT
+        value: "8081"
+      - key: LIVEKIT_API_KEY
+        sync: false          # You'll enter this on Render dashboard
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+
+  # 2. Background Worker — LiveKit Voice Agent (always-on)
+  - type: worker
+    name: gram-sahayak-agent
+    runtime: docker
+    dockerfilePath: ./Dockerfile.agent
+    plan: free
+    envVars:
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false

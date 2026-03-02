@@ -1,6 +1,7 @@
 """
 LiveKit Token Server + Scheme Search API
 Generates JWT tokens and serves scheme search endpoints.
+In production, also serves the built React frontend from dist/.
 Run alongside the LiveKit agent: python token_server.py
 """
 
@@ -8,9 +9,12 @@ import os
 import json
 import uuid
 import logging
+import mimetypes
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from dotenv import load_dotenv
 from livekit.api import AccessToken, VideoGrants
@@ -24,7 +28,11 @@ log = logging.getLogger("token_server")
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
-PORT = int(os.getenv("TOKEN_SERVER_PORT", "8081"))
+PORT = int(os.getenv("PORT", os.getenv("TOKEN_SERVER_PORT", "8081")))
+
+# Serve frontend static files from dist/ if it exists (production mode)
+DIST_DIR = Path(__file__).parent / "dist"
+SERVE_STATIC = DIST_DIR.is_dir()
 
 # Thread pool for DDGS web searches (keeps the HTTP server responsive)
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -89,6 +97,8 @@ class TokenHandler(BaseHTTPRequestHandler):
         handler = routes.get(path)
         if handler:
             handler(parsed)
+        elif SERVE_STATIC:
+            self._serve_static(path)
         else:
             self._json_response(404, {"error": "Not found"})
 
@@ -204,6 +214,44 @@ class TokenHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         print(f"[TokenServer] {args[0]}")
 
+    def _serve_static(self, path: str):
+        """Serve files from dist/ — fallback to index.html for SPA routing."""
+        # Map / to /index.html
+        file_path = DIST_DIR / (path.lstrip("/") or "index.html")
+
+        # Security: prevent path traversal
+        try:
+            file_path = file_path.resolve()
+            if not str(file_path).startswith(str(DIST_DIR.resolve())):
+                return self._json_response(403, {"error": "Forbidden"})
+        except Exception:
+            return self._json_response(400, {"error": "Bad request"})
+
+        # If file doesn't exist, serve index.html (SPA client-side routing)
+        if not file_path.is_file():
+            file_path = DIST_DIR / "index.html"
+
+        if not file_path.is_file():
+            return self._json_response(404, {"error": "Not found"})
+
+        mime_type, _ = mimetypes.guess_type(str(file_path))
+        if mime_type is None:
+            mime_type = "application/octet-stream"
+
+        self.send_response(200)
+        self.send_header("Content-Type", mime_type)
+        self._set_cors_headers()
+        # Cache static assets (they have content hashes in filenames)
+        if "/assets/" in path:
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.end_headers()
+        self.wfile.write(file_path.read_bytes())
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle each request in a new thread."""
+    daemon_threads = True
+
 
 def main():
     if not LIVEKIT_API_KEY or not LIVEKIT_API_SECRET:
@@ -216,8 +264,12 @@ def main():
     stats = scheme_lookup.get_db_stats()
     print(f"Database ready: {stats['total']} schemes ({stats['central']} central, {stats['state']} state)")
 
-    server = HTTPServer(("0.0.0.0", PORT), TokenHandler)
-    print(f"\nToken + Search API running on http://localhost:{PORT}")
+    server = ThreadedHTTPServer(("0.0.0.0", PORT), TokenHandler)
+    print(f"\nToken + Search API running on http://0.0.0.0:{PORT}")
+    if SERVE_STATIC:
+        print(f"  Serving frontend from: {DIST_DIR}")
+    else:
+        print("  Static file serving: OFF (no dist/ folder — use Vite dev server)")
     print(f"  Health:     http://localhost:{PORT}/api/health")
     print(f"  Token:      http://localhost:{PORT}/api/token?room=gram-sahayak&name=user")
     print(f"  Search:     http://localhost:{PORT}/api/search?q=education")

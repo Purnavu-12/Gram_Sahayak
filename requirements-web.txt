@@ -1,0 +1,4 @@
+# Requirements for the token server (web service)
+python-dotenv
+livekit-api
+duckduckgo-search

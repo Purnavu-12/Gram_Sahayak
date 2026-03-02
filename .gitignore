@@ -47,6 +47,3 @@ __pycache__/
 .Python
 venv/
 env/
-
-# Database (root level only, allow public/schemes.db)
-/schemes.db
