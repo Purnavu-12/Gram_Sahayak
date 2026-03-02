@@ -1,4 +1,8 @@
 {
+  "header": {
+    "title": "Gram Sahayak",
+    "subtitle": "Government Scheme Assistant"
+  },
   "welcome": "Welcome to Gram Sahayak",
   "welcomeSubtitle": "Your Digital Assistant for Government Schemes",
   "startConversation": "Start Voice Conversation",
@@ -49,6 +53,17 @@
   "clearFilters": "Clear Filters",
   "loadMore": "Load More Schemes",
   "noMoreSchemes": "No more schemes to load",
+  "quickFind": "What do you need help with?",
+  "catFarming": "Farming",
+  "catHealth": "Health",
+  "catEducation": "Education",
+  "catHousing": "Housing",
+  "catWomen": "Women",
+  "catFinance": "Loan & Money",
+  "catElderly": "Elderly",
+  "catDisability": "Disability",
+  "chooseLanguage": "Choose Your Language",
+  "chooseLanguageDesc": "अपनी भाषा चुनें",
   "errors": {
     "micPermission": "We need microphone access to help you. Please allow microphone access.",
     "connectionFailed": "Unable to connect. Please check your internet connection.",

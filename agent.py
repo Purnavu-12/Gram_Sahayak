@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+import asyncio
 import json
 import logging
 import sqlite3
@@ -17,6 +18,24 @@ from ddgs import DDGS
 import scheme_lookup
 
 load_dotenv()
+
+# ── DNS retry helper ─────────────────────────────────────────────────────────
+import socket
+_original_getaddrinfo = socket.getaddrinfo
+
+def _retry_getaddrinfo(*args, **kwargs):
+    """Retry DNS resolution up to 3 times to handle transient failures."""
+    last_err = None
+    for attempt in range(3):
+        try:
+            return _original_getaddrinfo(*args, **kwargs)
+        except socket.gaierror as e:
+            last_err = e
+            import time
+            time.sleep(0.5 * (attempt + 1))
+    raise last_err  # type: ignore
+
+socket.getaddrinfo = _retry_getaddrinfo
 
 log = logging.getLogger("gram-agent")
 
@@ -115,55 +134,81 @@ class ConversationMemory:
 # ── System instructions ──────────────────────────────────────────────────────
 
 SYSTEM_INSTRUCTIONS = """\
-You are a helpful Indian government schemes assistant. Your job is to help
-citizens find government schemes they are eligible for.
-Be slow while talking and ask follow-up questions to clarify their needs before recommending schemes.
+You are Gram Sahayak, a smart and friendly Indian government assistant.
+Your PRIMARY job is helping citizens find government schemes, but you can
+also help with general questions about government services, documents,
+processes, and rural welfare topics.
 
+Be warm, empathetic, and supportive — many users may be in difficult
+situations or unfamiliar with technology.
 
 RESPONSE STYLE:
-- Be concise and direct. Start speaking immediately — do NOT pause or hesitate.
-- Keep initial responses short (1-2 sentences), then elaborate if the user asks.
-- When presenting schemes, give the name and one-line summary first, then ask
-  if they want more details rather than dumping everything at once.
-- Speak at a natural pace. Be warm but efficient.
+- Be concise and direct. Start speaking immediately.
+- Keep answers short (1-3 sentences) and conversational, then go deeper
+  only when the user asks.
+- Speak at a natural, unhurried pace. Sound like a helpful friend, not a
+  robot reading a list.
 
-Ask follow-up questions to clarify the user's needs before recommending schemes.
-Choose the right scheme for the user based on their specific eligibility criteria.
-If asked about a specific scheme, provide accurate details including who it's for,
-what benefits it offers, and how to apply.
+SCHEME DISCOVERY — DO NOT JUST LIST SCHEMES:
+1. When a user describes a need, call `search_schemes`. This automatically
+   fetches from the database AND pre-fetches detailed web info in parallel,
+   so follow-up detail requests are instant.
+2. NEVER invent scheme names — always use a tool.
+3. **DO NOT dump a list of 3-5 schemes and ask "which one do you want?"**
+   Instead, use the results internally and ASK THE USER QUESTIONS to figure
+   out which scheme fits them best:
+   - "Are you looking for this for yourself or a family member?"
+   - "What state are you from?"
+   - "Are you currently employed or looking for work?"
+   - "How old are you?" / "What is your approximate family income?"
+   - "Do you belong to SC/ST/OBC or General category?"
+   Build a picture of the user, THEN recommend the 1-2 best-matching
+   schemes with a short explanation of WHY it fits them.
+4. Only if multiple schemes genuinely fit equally, briefly mention 2-3
+   and explain the difference, then recommend which one to explore first.
+5. If the search returns NO database results but includes web_details,
+   use those web findings to help the user.
+6. When the user asks for details on a specific scheme, call
+   `get_scheme_details` — it checks DB first and enriches from the web
+   in parallel, so you'll have comprehensive info instantly.
 
-IMPORTANT RULES:
-1. When a user describes a problem or need (money, health, education, housing,
-   marriage, farming, business, etc.), use your tools to search the schemes
-   database for relevant government schemes.
-2. ALWAYS call the `search_schemes` tool to look up schemes — never invent or
-   guess scheme names.
-3. If the search returns multiple schemes, present the top 3-5 briefly, then
-   ask clarifying questions to narrow down:
-   - Which state do they live in?
-   - Their specific situation (age, gender, caste, employment status, etc.)
-   - What type of help they need (cash, loan, training, subsidy, etc.)
-4. When the user asks about a SPECIFIC scheme by name (e.g. 'tell me about
-   PM-KISAN', 'what are the benefits of PMAY?'), call `get_scheme_details`
-   to get full details — benefits, eligibility, documents, how to apply.
-   This gives much richer info than the basic search results.
-5. Use `web_search` if you need the latest news, updates, or any info not
-   available in the database (e.g. application deadlines, recent changes).
-6. Once you narrow it down to the best match, give full details: scheme name,
-   description, ministry, and the URL where they can apply.
-7. Respond in the same language the user speaks in.
-8. Be empathetic and supportive — many users may be in difficult situations.
-9. If no schemes match, say so honestly and suggest they check myscheme.gov.in
-   directly or contact the helpline.
+**HANDLING SLOW OPERATIONS — CRITICAL:**
+Before calling `web_search`, `smart_answer`, or any tool that may take
+a few seconds, FIRST say something brief like:
+- "Let me look that up for you..."
+- "One moment, checking that..."
+- "Searching for the latest info..."
+This prevents awkward silence.
 
-CONVERSATION MEMORY — you have persistent per-conversation memory tools:
-- Call `save_user_detail` to store info the user shares (state, gender, age,
-  occupation, caste, need, etc.) so you never re-ask.
-- Call `recall_conversation` only when you're unsure if the user already told
-  you something — do NOT call it on every turn.
-- When the user gives new info (e.g. their state), call `refine_search`
-  to re-run the last search with the new filter instead of starting over.
-- Use `shortlist_scheme` to save the final recommended scheme(s).
+BEYOND SCHEMES — be a helpful general assistant:
+- Aadhaar, PAN, ration card, voter ID, passport, driving license,
+  certificates — use `smart_answer` for step-by-step guidance.
+- Government portals, helplines, RTI, complaints, pension, tax — use
+  `smart_answer`.
+- Crop prices, weather, agricultural advice, rural welfare — use
+  `smart_answer`.
+- Anything you don't know or that needs current info — use `smart_answer`
+  or `web_search`. NEVER say "I can only help with schemes."
+
+CONVERSATION MEMORY:
+- Call `save_user_detail` EVERY TIME the user shares personal info.
+- Call `recall_conversation` before asking something they may have
+  already told you.
+- Use `refine_search` to re-run last search with new filters.
+- Use `shortlist_scheme` to save the final recommendation.
+
+LANGUAGE RULES — CRITICAL:
+- Always respond in the same language the user speaks in.
+- When speaking in an Indian language (Hindi, Tamil, Telugu, Kannada,
+  Malayalam, Bengali, Marathi, Gujarati, etc.), speak NATURALLY like a
+  real Indian person does — mix in common English words freely.
+  For example in Hindi: "Aapka application process bahut simple hai" 
+  not "Aapki aavedan prakriya bahut saral hai".
+  In Tamil: "Ungaloda eligibility check pannalaam" not pure literary Tamil.
+- Use the everyday spoken form with English words for technical/government
+  terms (scheme, application, eligibility, documents, online, portal,
+  download, form, etc.) — don't translate these into formal/pure language.
+- Sound like a knowledgeable friend chatting, not a textbook.
 """
 
 
@@ -245,43 +290,67 @@ class Assistant(Agent):
         log.info("Tool call: search_schemes(query=%r, state=%r, category=%r, level=%r)",
                  query, state, category, level)
 
-        results = scheme_lookup.search_schemes(
-            query=query,
-            state=state or None,
-            category=category or None,
-            level=level or None,
-            limit=10,
-        )
+        # ── Run DB search AND web pre-fetch in parallel ──────────────────
+        async def _db_search():
+            return scheme_lookup.search_schemes(
+                query=query,
+                state=state or None,
+                category=category or None,
+                level=level or None,
+                limit=10,
+            )
+
+        async def _web_prefetch():
+            """Pre-fetch detailed web info so follow-up detail requests are instant."""
+            try:
+                web_query = f"Indian government scheme {query} eligibility benefits how to apply"
+                if state:
+                    web_query += f" {state}"
+                return await asyncio.to_thread(self._sync_web_search, web_query, 5)
+            except Exception as e:
+                log.warning("Web prefetch failed: %s", e)
+                return []
+
+        results, web_details = await asyncio.gather(_db_search(), _web_prefetch())
 
         if not results:
+            log.info("No DB results for '%s', using web fallback.", query)
             self._mem.save_search(query, {"state": state, "category": category, "level": level}, [])
+            if web_details:
+                return json.dumps({
+                    "found": 0,
+                    "db_results": 0,
+                    "web_fallback": True,
+                    "message": "No exact matches in our database, but I found relevant info from the web.",
+                    "web_results": web_details,
+                }, ensure_ascii=False)
             return json.dumps({
                 "found": 0,
-                "message": "No schemes found matching the query. Try different keywords."
+                "message": "No schemes found. Try different keywords or ask me to search the web."
             })
 
         schemes_out = []
         for r in results:
             schemes_out.append({
                 "name": r["scheme_name"],
-                "short_title": r["short_title"],
-                "description": r["description"],
+                "description": r["description"][:200],
                 "ministry": r["ministry"],
                 "level": r["level"],
-                "categories": r["categories"],
-                "tags": r["tags"],
-                "states": r["states"],
                 "apply_url": r["url"],
             })
 
-        # Persist to conversation memory
         self._mem.save_search(
             query,
             {"state": state, "category": category, "level": level},
             schemes_out,
         )
 
-        return json.dumps({"found": len(schemes_out), "schemes": schemes_out}, ensure_ascii=False)
+        payload = {"found": len(schemes_out), "schemes": schemes_out}
+        # Attach pre-fetched web details so the model has rich info immediately
+        if web_details:
+            payload["web_details"] = web_details[:4]
+
+        return json.dumps(payload, ensure_ascii=False)
 
     @function_tool(description=(
         "Re-run the LAST search with additional or updated filters. Use this "
@@ -348,7 +417,9 @@ class Assistant(Agent):
     @function_tool(description=(
         "Search the web using DuckDuckGo for up-to-date information. Use this "
         "when you need the latest news, application deadlines, recent policy "
-        "changes, or any info not in the local schemes database."
+        "changes, or any info not in the local schemes database. "
+        "IMPORTANT: Before calling this tool, always tell the user you are "
+        "searching the web so they know to wait."
     ))
     async def web_search(self, query: str) -> str:
         """Search the web for current information.
@@ -358,8 +429,7 @@ class Assistant(Agent):
         """
         log.info("Tool call: web_search(query=%r)", query)
         try:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=5))
+            results = await asyncio.to_thread(self._sync_web_search, query, 5)
             if not results:
                 return json.dumps({"found": 0, "message": "No web results found."})
             return json.dumps({"found": len(results), "results": results}, ensure_ascii=False)
@@ -367,54 +437,131 @@ class Assistant(Agent):
             log.error("Web search failed: %s", e)
             return json.dumps({"error": f"Web search failed: {e}"})
 
+    @staticmethod
+    def _sync_web_search(query: str, max_results: int = 5) -> list:
+        """Synchronous DuckDuckGo search (called from threadpool)."""
+        with DDGS() as ddgs:
+            return list(ddgs.text(query, max_results=max_results))
+
     @function_tool(description=(
         "Get FULL details about a specific government scheme — including benefits, "
         "eligibility, documents required, how to apply, and more. Use this when the "
         "user asks for in-depth information about a SPECIFIC scheme (e.g. 'tell me "
-        "about PM-KISAN', 'what are PMAY benefits?'). Pass the scheme name or slug. "
-        "This searches the web for comprehensive, up-to-date scheme information."
+        "about PM-KISAN', 'what are PMAY benefits?'). Pass the scheme name or slug."
     ))
     async def get_scheme_details(self, scheme_name: str) -> str:
-        """Fetch full details for a specific scheme via web search.
+        """Fetch full details for a specific scheme. Runs DB + web in parallel for speed.
 
         Args:
             scheme_name: The scheme name or slug (e.g. 'PM-KISAN', 'Pradhan Mantri Awas Yojana', 'pmay-u').
         """
         log.info("Tool call: get_scheme_details(scheme_name=%r)", scheme_name)
-        try:
-            # Search for the scheme on myscheme.gov.in and general web
-            queries = [
-                f"{scheme_name} scheme benefits eligibility myscheme.gov.in",
-                f"{scheme_name} scheme how to apply documents required India",
-            ]
-            all_results = []
-            with DDGS() as ddgs:
-                for q in queries:
-                    results = list(ddgs.text(q, max_results=5))
-                    all_results.extend(results)
 
-            if not all_results:
-                return json.dumps({
-                    "error": f"Could not find details for '{scheme_name}'. "
-                             "Try searching with search_schemes first."
-                })
+        # ── Run local DB lookup AND web search in PARALLEL ───────────────
+        async def _local_lookup():
+            local = scheme_lookup.get_scheme_by_name(scheme_name)
+            if not local:
+                local = scheme_lookup.get_scheme_by_slug(scheme_name)
+            if not local:
+                # Check search history
+                last = self._mem.get_last_search()
+                if last:
+                    for s in last["results"]:
+                        if scheme_name.lower() in s.get("name", "").lower():
+                            return s
+            return local
 
-            # Deduplicate by URL
-            seen_urls = set()
-            unique = []
-            for r in all_results:
-                url = r.get("href", "")
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    unique.append(r)
+        async def _web_detail():
+            try:
+                q1 = f"{scheme_name} scheme benefits eligibility how to apply myscheme.gov.in"
+                q2 = f"{scheme_name} scheme documents required application process India"
+                r1, r2 = await asyncio.gather(
+                    asyncio.to_thread(self._sync_web_search, q1, 4),
+                    asyncio.to_thread(self._sync_web_search, q2, 4),
+                )
+                all_results = (r1 or []) + (r2 or [])
+                seen: set[str] = set()
+                unique = []
+                for r in all_results:
+                    url = r.get("href", "")
+                    if url not in seen:
+                        seen.add(url)
+                        unique.append(r)
+                return unique[:6]
+            except Exception as e:
+                log.warning("Web detail search failed: %s", e)
+                return []
 
+        local, web_results = await asyncio.gather(_local_lookup(), _web_detail())
+
+        if local:
+            result = {
+                "scheme": scheme_name,
+                "source": "local_database",
+                "details": local,
+            }
+            if web_results:
+                result["web_enrichment"] = web_results
+                result["tip"] = ("Use web_enrichment for additional details like latest updates, "
+                                 "step-by-step application process, and documents required.")
+            return json.dumps(result, ensure_ascii=False)
+
+        if web_results:
             return json.dumps({
                 "scheme": scheme_name,
-                "web_results": unique[:8],
-                "tip": "Summarize the key details: benefits, eligibility, documents, application process."
+                "source": "web_search",
+                "web_results": web_results,
+                "tip": "Summarize: benefits, eligibility, documents, how to apply."
+            }, ensure_ascii=False)
+
+        return json.dumps({
+            "error": f"Could not find details for '{scheme_name}'. "
+                     "Try searching with search_schemes first."
+        })
+
+    # ── General knowledge tool ─────────────────────────────────────────────
+
+    @function_tool(description=(
+        "Answer ANY general question that is NOT specifically about searching "
+        "for a government scheme. Use this for: how to get Aadhaar/PAN/ration "
+        "card/passport, government processes, helpline numbers, RTI, tax filing, "
+        "crop prices, weather, agricultural advice, rural welfare, or ANY topic "
+        "the user asks about that you don't have direct knowledge of. "
+        "This searches the web and returns relevant information. "
+        "IMPORTANT: Before calling this tool, always tell the user you are "
+        "searching for the answer so they know to wait."
+    ))
+    async def smart_answer(self, question: str) -> str:
+        """Search the web to answer a general question.
+
+        Args:
+            question: The user's question in natural language (e.g. 'how to apply for Aadhaar card', 'PM helpline number', 'wheat MSP price 2026').
+        """
+        log.info("Tool call: smart_answer(question=%r)", question)
+        try:
+            # Build a focused search query
+            search_query = f"{question} India government official"
+            results = await asyncio.to_thread(self._sync_web_search, search_query, 6)
+
+            if not results:
+                # Try a broader search
+                results = await asyncio.to_thread(self._sync_web_search, question, 5)
+
+            if not results:
+                return json.dumps({
+                    "found": 0,
+                    "message": "I couldn't find information on that. You may want to "
+                               "check the official government website or call the helpline."
+                })
+
+            return json.dumps({
+                "found": len(results),
+                "results": results,
+                "instruction": "Summarize the most relevant information from these results "
+                               "in a clear, helpful way. Give step-by-step guidance if applicable."
             }, ensure_ascii=False)
         except Exception as e:
-            log.error("Scheme detail search failed: %s", e)
+            log.error("smart_answer failed: %s", e)
             return json.dumps({"error": f"Search failed: {e}"})
 
     # ── Info tools ────────────────────────────────────────────────────────
@@ -441,7 +588,7 @@ class Assistant(Agent):
 server = AgentServer()
 
 
-@server.rtc_session(agent_name="my-agent")
+@server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
     session = AgentSession(
         llm=google.beta.realtime.RealtimeModel(
@@ -449,12 +596,22 @@ async def my_agent(ctx: agents.JobContext):
             enable_affective_dialog=True,
             realtime_input_config=types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                    silence_duration_ms=300,
-                    prefix_padding_ms=100,
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                    silence_duration_ms=800,
+                    prefix_padding_ms=300,
                 ),
             ),
-        )
+            conn_options=agents.APIConnectOptions(
+                max_retry=5,
+                retry_interval=3.0,
+                timeout=15.0,
+            ),
+        ),
+        allow_interruptions=True,
+        min_interruption_duration=1.0,
+        min_interruption_words=2,
+        min_endpointing_delay=0.8,
+        max_endpointing_delay=5.0,
     )
 
     await session.start(
@@ -463,6 +620,14 @@ async def my_agent(ctx: agents.JobContext):
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
                 noise_cancellation=lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC(),
+            ),
+            audio_output=room_io.AudioOutputOptions(
+                sample_rate=24000,
+                num_channels=1,
+                track_publish_options=rtc.TrackPublishOptions(
+                    dtx=False,
+                    red=True,
+                ),
             ),
         ),
     )

@@ -1,4 +1,8 @@
 {
+  "header": {
+    "title": "ग्राम सहायक",
+    "subtitle": "सरकारी योजना सहायक"
+  },
   "welcome": "ग्राम सहायक में आपका स्वागत है",
   "welcomeSubtitle": "सरकारी योजनाओं के लिए आपका डिजिटल सहायक",
   "startConversation": "आवाज़ से बातचीत शुरू करें",
@@ -49,6 +53,17 @@
   "clearFilters": "फ़िल्टर साफ़ करें",
   "loadMore": "और योजनाएं लोड करें",
   "noMoreSchemes": "लोड करने के लिए और योजनाएं नहीं हैं",
+  "quickFind": "आपको किस मदद की ज़रूरत है?",
+  "catFarming": "खेती",
+  "catHealth": "स्वास्थ्य",
+  "catEducation": "शिक्षा",
+  "catHousing": "आवास",
+  "catWomen": "महिलाएं",
+  "catFinance": "लोन और पैसा",
+  "catElderly": "बुज़ुर्ग",
+  "catDisability": "दिव्यांग",
+  "chooseLanguage": "Choose Your Language",
+  "chooseLanguageDesc": "अपनी भाषा चुनें",
   "errors": {
     "micPermission": "हम आपकी आवाज़ नहीं सुन पा रहे हैं। कृपया माइक्रोफ़ोन की अनुमति दें।",
     "connectionFailed": "कनेक्ट नहीं हो पा रहा है। कृपया अपना इंटरनेट कनेक्शन जांचें।",
