@@ -49,7 +49,7 @@ class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex items-center justify-center bg-background p-4">
-          <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center">
+          <div className="max-w-md w-full bg-surface rounded-2xl shadow-large border border-border p-8 text-center">
             <div className="text-6xl mb-4">⚠️</div>
             <h1 className="text-2xl font-bold text-error mb-4">
               Something went wrong
@@ -58,8 +58,8 @@ class ErrorBoundary extends Component<Props, State> {
               We're sorry, but something unexpected happened. Please try refreshing the page.
             </p>
             {this.state.error && (
-              <div className="mb-6 p-4 bg-gray-100 rounded-lg text-left">
-                <p className="text-sm font-mono text-gray-700 break-words">
+              <div className="mb-6 p-4 bg-background-secondary rounded-lg text-left border border-border">
+                <p className="text-sm font-mono text-text-secondary break-words">
                   {this.state.error.toString()}
                 </p>
               </div>

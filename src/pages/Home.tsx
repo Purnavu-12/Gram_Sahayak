@@ -4,415 +4,320 @@ import VoiceButton from '../components/common/VoiceButton';
 import SchemeCard from '../components/common/SchemeCard';
 import SchemeDetailsModal from '../components/features/SchemeDetailsModal';
 import { initDatabase, getFeaturedSchemes, searchSchemes, getDbStats, getAllCategories, getAllStates } from '../services/schemeData';
+import { getVoiceService } from '../services/livekitService';
 import { Scheme } from '../types';
 
-const ITEMS_PER_PAGE = 12;
+// Pre-warm LiveKit token + room on module load (before any user interaction)
+getVoiceService();
+
+// ── Quick category definitions ──────────────────────────────────────────────
+const QUICK_CATEGORIES = [
+  { key: 'farmer agriculture', icon: '👨‍🌾', labelKey: 'catFarming' },
+  { key: 'health medical', icon: '💊', labelKey: 'catHealth' },
+  { key: 'education scholarship', icon: '🎓', labelKey: 'catEducation' },
+  { key: 'housing home', icon: '🏠', labelKey: 'catHousing' },
+  { key: 'women girl', icon: '👩', labelKey: 'catWomen' },
+  { key: 'loan business', icon: '💰', labelKey: 'catFinance' },
+  { key: 'pension elderly senior', icon: '👴', labelKey: 'catElderly' },
+  { key: 'disability handicap', icon: '♿', labelKey: 'catDisability' },
+] as const;
+
+const PER_PAGE = 12;
 
 const Home: React.FC = () => {
   const { t } = useLanguage();
-  const [showSchemes, setShowSchemes] = useState(false);
-  const [selectedScheme, setSelectedScheme] = useState<Scheme | null>(null);
+
+  // Data
+  const [schemes, setSchemes] = useState<Scheme[]>([]);
+  const [webResults, setWebResults] = useState<Scheme[]>([]);
   const [displaySchemes, setDisplaySchemes] = useState<Scheme[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [selectedScheme, setSelectedScheme] = useState<Scheme | null>(null);
   const [dbStats, setDbStats] = useState({ total: 0, central: 0, state: 0 });
-  const [searchQuery, setSearchQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
-  const [allSchemes, setAllSchemes] = useState<Scheme[]>([]);
 
   // Filters
-  const [selectedState, setSelectedState] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedLevel, setSelectedLevel] = useState('');
-  const [availableStates, setAvailableStates] = useState<string[]>([]);
-  const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [query, setQuery] = useState('');
+  const [state, setState] = useState('');
+  const [category, setCategory] = useState('');
+  const [level, setLevel] = useState('');
+  const [stateOptions, setStateOptions] = useState<string[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
 
-  // Initialize database on component mount
+  // UI state
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [searched, setSearched] = useState(false);
+
+  // ── Init ─────────────────────────────────────────────────────────────
   useEffect(() => {
-    const init = async () => {
+    (async () => {
       try {
         setLoading(true);
         await initDatabase();
-
-        // Get database statistics
-        const stats = await getDbStats();
-        setDbStats(stats);
-
-        // Load filter options
-        const [states, categories] = await Promise.all([
+        const [stats, states, categories, featured] = await Promise.all([
+          getDbStats(),
           getAllStates(),
-          getAllCategories()
+          getAllCategories(),
+          getFeaturedSchemes(6),
         ]);
-        setAvailableStates(states);
-        setAvailableCategories(categories);
-
-        // Load featured schemes
-        const featured = await getFeaturedSchemes(6);
+        setDbStats(stats);
+        setStateOptions(states);
+        setCategoryOptions(categories);
+        setSchemes(featured);
         setDisplaySchemes(featured);
-
-        console.log(`✅ Loaded ${featured.length} schemes from database (${stats.total} total)`);
-      } catch (error) {
-        console.error('Failed to initialize database:', error);
+      } catch (err) {
+        console.error('Init failed:', err);
       } finally {
         setLoading(false);
       }
-    };
-    init();
+    })();
   }, []);
 
-  const handleStartListening = () => {
-    console.log('Started listening...');
-    setTimeout(() => {
-      setShowSchemes(true);
-    }, 2000);
-  };
-
-  const handleStopListening = () => {
-    console.log('Stopped listening...');
-  };
-
-  const handleSchemeSelect = (schemeId: string) => {
-    const scheme = displaySchemes.find(s => s.id === schemeId);
-    if (scheme) {
-      setSelectedScheme(scheme);
-    }
-  };
-
-  const handleCloseModal = () => {
-    setSelectedScheme(null);
-  };
-
-  const handleSearch = async () => {
+  // ── Search ───────────────────────────────────────────────────────────
+  const runSearch = async () => {
     setLoading(true);
-    setCurrentPage(1);
-
+    setPage(1);
+    setSearched(true);
     try {
       const filters: { state?: string; category?: string; level?: string } = {};
-      if (selectedState) filters.state = selectedState;
-      if (selectedCategory) filters.category = selectedCategory;
-      if (selectedLevel) filters.level = selectedLevel;
-
-      const limit = 100; // Get more results for pagination
-      const results = await searchSchemes(searchQuery || '', filters, limit);
-      setAllSchemes(results);
-      setDisplaySchemes(results.slice(0, ITEMS_PER_PAGE));
-      setHasMore(results.length > ITEMS_PER_PAGE);
-      setShowSchemes(true);
-    } catch (error) {
-      console.error('Search failed:', error);
-      setAllSchemes([]);
+      if (state) filters.state = state;
+      if (category) filters.category = category;
+      if (level) filters.level = level;
+      const { results, webResults: web } = await searchSchemes(query, filters, 100);
+      setSchemes(results);
+      setWebResults(web);
+      setDisplaySchemes(results.slice(0, PER_PAGE));
+    } catch {
+      setSchemes([]);
+      setWebResults([]);
       setDisplaySchemes([]);
-      setHasMore(false);
     } finally {
       setLoading(false);
     }
   };
 
   const handleLoadMore = () => {
-    const nextPage = currentPage + 1;
-    const startIndex = nextPage * ITEMS_PER_PAGE;
-    const endIndex = startIndex + ITEMS_PER_PAGE;
-    const newSchemes = allSchemes.slice(0, endIndex);
-
-    setDisplaySchemes(newSchemes);
-    setCurrentPage(nextPage);
-    setHasMore(endIndex < allSchemes.length);
+    const next = page + 1;
+    setDisplaySchemes(schemes.slice(0, next * PER_PAGE));
+    setPage(next);
   };
 
-  const handleClearFilters = () => {
-    setSelectedState('');
-    setSelectedCategory('');
-    setSelectedLevel('');
-    setSearchQuery('');
+  const clearFilters = () => {
+    setQuery('');
+    setState('');
+    setCategory('');
+    setLevel('');
+    setSearched(false);
+    setWebResults([]);
   };
 
-  // Trigger search when filters change
+  // Auto-search when filters change
   useEffect(() => {
-    if (selectedState || selectedCategory || selectedLevel) {
-      handleSearch();
-    }
+    if (state || category || level) runSearch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedState, selectedCategory, selectedLevel]);
+  }, [state, category, level]);
+
+  const hasMore = displaySchemes.length < schemes.length;
 
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Hero Section */}
-      <section className="relative flex-1 flex flex-col items-center justify-center py-16 px-4 overflow-hidden">
-        {/* Animated background gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-secondary/5 to-background -z-10"></div>
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(99,102,241,0.1),transparent_50%)] -z-10"></div>
+      {/* ─── Hero ──────────────────────────────────────────────────────── */}
+      <section className="relative flex flex-col items-center justify-center py-20 md:py-28 px-4 overflow-hidden">
+        {/* Animated mesh background */}
+        <div className="absolute inset-0 -z-10 bg-mesh-gradient opacity-80" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] -z-10 bg-gradient-to-b from-primary/8 via-transparent to-transparent blur-3xl rounded-full" />
+        {/* Floating orbs */}
+        <div className="absolute top-20 left-[10%] w-72 h-72 -z-10 bg-primary/5 rounded-full blur-[100px] animate-float" />
+        <div className="absolute bottom-10 right-[15%] w-56 h-56 -z-10 bg-secondary/5 rounded-full blur-[80px] animate-float" style={{ animationDelay: '3s' }} />
 
-        <div className="text-center mb-12 max-w-4xl">
-          <div className="inline-block mb-6">
-            <span className="inline-block px-4 py-2 bg-primary/10 text-primary rounded-full text-sm font-semibold border border-primary/20 shadow-soft">
-              🇮🇳 Empowering Rural India
-            </span>
-          </div>
+        <div className="text-center max-w-3xl mb-12">
+          <span className="inline-flex items-center gap-2 px-4 py-1.5 text-xs font-semibold text-primary bg-primary/8 rounded-full border border-primary/15 mb-6 backdrop-blur-sm">
+            <span className="w-1.5 h-1.5 bg-accent rounded-full animate-pulse" />
+            🇮🇳 Empowering Rural India
+          </span>
 
-          <h1 className="text-4xl md:text-6xl font-bold mb-6 leading-tight">
+          <h1 className="text-4xl md:text-6xl font-bold leading-[1.1] mb-5 tracking-tight">
             <span className="gradient-text">{t('welcome')}</span>
           </h1>
 
-          <p className="text-xl md:text-2xl text-text-secondary mb-6 font-medium">
-            {t('welcomeSubtitle')}
-          </p>
+          <p className="text-lg md:text-xl text-text-secondary mb-3 leading-relaxed">{t('welcomeSubtitle')}</p>
+          <p className="text-sm text-text-tertiary max-w-xl mx-auto">{t('description')}</p>
 
-          <p className="text-base md:text-lg text-text-secondary max-w-2xl mx-auto leading-relaxed">
-            {t('description')}
-          </p>
-
+          {/* Stats */}
           {dbStats.total > 0 && (
-            <div className="mt-8 inline-flex items-center gap-6 bg-white rounded-2xl shadow-medium p-6 border border-border/50">
-              <div className="text-center">
-                <p className="text-3xl font-bold text-primary">{dbStats.total}</p>
-                <p className="text-sm text-text-secondary mt-1">{t('schemesAvailable')}</p>
-              </div>
-              <div className="w-px h-12 bg-border"></div>
-              <div className="text-center">
-                <p className="text-2xl font-bold text-accent">{dbStats.central}</p>
-                <p className="text-sm text-text-secondary mt-1">{t('central')}</p>
-              </div>
-              <div className="w-px h-12 bg-border"></div>
-              <div className="text-center">
-                <p className="text-2xl font-bold text-secondary">{dbStats.state}</p>
-                <p className="text-sm text-text-secondary mt-1">{t('stateUT')}</p>
-              </div>
+            <div className="mt-10 inline-flex items-center gap-6 glass-card px-8 py-5">
+              <Stat value={dbStats.total} label={t('schemesAvailable')} color="text-primary" />
+              <Divider />
+              <Stat value={dbStats.central} label={t('central')} color="text-accent" />
+              <Divider />
+              <Stat value={dbStats.state} label={t('stateUT')} color="text-secondary" />
             </div>
           )}
         </div>
 
+        {/* Voice CTA */}
         <VoiceButton
-          onStartListening={handleStartListening}
-          onStopListening={handleStopListening}
+          onStartListening={() => console.log('voice started')}
+          onStopListening={() => console.log('voice stopped')}
         />
 
-        {/* Search Bar */}
-        <div className="mt-10 w-full max-w-3xl">
-          <div className="flex flex-col md:flex-row gap-3">
-            <div className="relative flex-1">
-              <input
-                type="text"
-                placeholder={t('searchPlaceholder')}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                className="w-full px-6 py-4 rounded-xl border-2 border-border focus:border-primary focus:ring-4 focus:ring-primary/10 focus:outline-none text-lg shadow-soft transition-all duration-300 bg-white"
-              />
-              <svg className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-            </div>
-            <button
-              onClick={handleSearch}
-              className="btn-primary px-8 md:px-10 whitespace-nowrap"
-              disabled={loading}
-            >
+        {/* ─── Search bar ──────────────────────────────────────────────── */}
+        <div className="mt-12 w-full max-w-2xl">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder={t('searchPlaceholder')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+              className="flex-1 px-5 py-3 rounded-xl border border-border-light bg-surface text-text-primary text-base
+                         placeholder:text-text-tertiary
+                         focus:border-primary/50 focus:ring-4 focus:ring-primary/10 outline-none transition-all shadow-soft"
+            />
+            <button onClick={runSearch} disabled={loading} className="btn-primary px-6 whitespace-nowrap">
               {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  {t('searching')}
-                </span>
-              ) : (
-                <span className="flex items-center gap-2">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                  {t('search')}
-                </span>
-              )}
+                <svg className="animate-spin h-5 w-5 mx-auto" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : t('search')}
             </button>
           </div>
 
-          {/* Filters */}
-          <div className="mt-6 space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* State Filter */}
-              <div className="relative">
-                <select
-                  value={selectedState}
-                  onChange={(e) => setSelectedState(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-border focus:border-primary focus:ring-4 focus:ring-primary/10 focus:outline-none appearance-none bg-white shadow-soft transition-all duration-300 cursor-pointer"
-                >
-                  <option value="">{t('allStates')}</option>
-                  {availableStates.map(state => (
-                    <option key={state} value={state}>{state}</option>
-                  ))}
-                </select>
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
+          {/* Filters row */}
+          <div className="grid grid-cols-3 gap-3 mt-3">
+            <Select value={state} onChange={setState} placeholder={t('allStates')} options={stateOptions} />
+            <Select value={category} onChange={setCategory} placeholder={t('allCategories')} options={categoryOptions} />
+            <Select value={level} onChange={setLevel} placeholder={t('allLevels')} options={[
+              { value: 'Central', label: t('centralSchemes') },
+              { value: 'State', label: t('stateSchemes') },
+            ]} />
+          </div>
 
-              {/* Category Filter */}
-              <div className="relative">
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-border focus:border-primary focus:ring-4 focus:ring-primary/10 focus:outline-none appearance-none bg-white shadow-soft transition-all duration-300 cursor-pointer"
-                >
-                  <option value="">{t('allCategories')}</option>
-                  {availableCategories.map(category => (
-                    <option key={category} value={category}>{category}</option>
-                  ))}
-                </select>
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
+          {(state || category || level || query) && (
+            <button onClick={clearFilters} className="mt-3 text-sm text-primary font-semibold hover:text-primary-light transition-colors">
+              {t('clearFilters')}
+            </button>
+          )}
+        </div>
 
-              {/* Level Filter */}
-              <div className="relative">
-                <select
-                  value={selectedLevel}
-                  onChange={(e) => setSelectedLevel(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border-2 border-border focus:border-primary focus:ring-4 focus:ring-primary/10 focus:outline-none appearance-none bg-white shadow-soft transition-all duration-300 cursor-pointer"
-                >
-                  <option value="">{t('allLevels')}</option>
-                  <option value="Central">{t('centralSchemes')}</option>
-                  <option value="State">{t('stateSchemes')}</option>
-                </select>
-                <svg className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-secondary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Clear Filters Button */}
-            {(selectedState || selectedCategory || selectedLevel || searchQuery) && (
-              <div className="flex justify-center">
-                <button
-                  onClick={handleClearFilters}
-                  className="inline-flex items-center gap-2 text-sm text-primary hover:text-primary-dark font-semibold transition-colors duration-300 px-4 py-2 rounded-lg hover:bg-primary/5"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                  {t('clearFilters')}
-                </button>
-              </div>
-            )}
+        {/* ─── Quick Category Buttons (village-friendly) ─────────────── */}
+        <div className="mt-10 w-full max-w-3xl">
+          <p className="text-center text-sm text-text-tertiary mb-4 font-medium">{t('quickFind')}</p>
+          <div className="grid grid-cols-3 md:grid-cols-4 gap-3">
+            {QUICK_CATEGORIES.map((cat) => (
+              <button
+                key={cat.key}
+                onClick={() => {
+                  setQuery(cat.key);
+                  setCategory('');
+                  setSearched(true);
+                  setLoading(true);
+                  setPage(1);
+                  searchSchemes(cat.key, {}, 100).then(({ results, webResults: web }) => {
+                    setSchemes(results);
+                    setWebResults(web);
+                    setDisplaySchemes(results.slice(0, PER_PAGE));
+                  }).catch(() => {
+                    setSchemes([]); setWebResults([]); setDisplaySchemes([]);
+                  }).finally(() => setLoading(false));
+                }}
+                className="group flex flex-col items-center gap-2 py-4 px-2 rounded-2xl
+                           bg-surface-glass border border-border hover:border-primary/40
+                           hover:bg-primary/8 transition-all duration-300 hover:-translate-y-0.5
+                           hover:shadow-glow active:scale-95"
+              >
+                <span className="text-3xl md:text-4xl group-hover:scale-110 transition-transform">{cat.icon}</span>
+                <span className="text-xs md:text-sm font-semibold text-text-secondary group-hover:text-primary transition-colors leading-tight text-center">
+                  {t(cat.labelKey)}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
 
-        {/* Features */}
-        <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl w-full">
-          <div className="group relative card-gradient text-center transform hover:scale-105 transition-all duration-300">
-            <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative">
-              <div className="text-6xl mb-4 transform group-hover:scale-110 transition-transform duration-300">🎤</div>
-              <h3 className="text-xl font-bold mb-3 text-text-primary">{t('voiceFirst')}</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">
-                {t('voiceFirstDesc')}
-              </p>
-            </div>
-          </div>
-          <div className="group relative card-gradient text-center transform hover:scale-105 transition-all duration-300">
-            <div className="absolute inset-0 bg-gradient-to-br from-secondary/10 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative">
-              <div className="text-6xl mb-4 transform group-hover:scale-110 transition-transform duration-300">🎯</div>
-              <h3 className="text-xl font-bold mb-3 text-text-primary">{t('smartMatching')}</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">
-                {t('smartMatchingDesc')}
-              </p>
-            </div>
-          </div>
-          <div className="group relative card-gradient text-center transform hover:scale-105 transition-all duration-300">
-            <div className="absolute inset-0 bg-gradient-to-br from-accent/10 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-            <div className="relative">
-              <div className="text-6xl mb-4 transform group-hover:scale-110 transition-transform duration-300">📱</div>
-              <h3 className="text-xl font-bold mb-3 text-text-primary">{t('simpleAccessible')}</h3>
-              <p className="text-sm text-text-secondary leading-relaxed">
-                {t('simpleAccessibleDesc')}
-              </p>
-            </div>
-          </div>
+        {/* ─── Feature cards ───────────────────────────────────────────── */}
+        <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl w-full">
+          <FeatureCard icon="🎤" title={t('voiceFirst')} desc={t('voiceFirstDesc')} accent="primary" />
+          <FeatureCard icon="🎯" title={t('smartMatching')} desc={t('smartMatchingDesc')} accent="secondary" />
+          <FeatureCard icon="📱" title={t('simpleAccessible')} desc={t('simpleAccessibleDesc')} accent="accent" />
         </div>
       </section>
 
-      {/* Schemes Section */}
-      {(showSchemes || displaySchemes.length > 0) && (
-        <section className="py-16 px-4 bg-gradient-to-b from-background to-white">
-          <div className="container mx-auto max-w-7xl">
-            <div className="text-center mb-12">
-              <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                {searchQuery ? (
-                  <>
-                    <span className="gradient-text">{t('searchResults')}</span>
-                    <span className="text-text-secondary ml-2">({displaySchemes.length})</span>
-                  </>
-                ) : (
-                  <span className="gradient-text">{t('eligibleSchemes')}</span>
-                )}
-              </h2>
-              <div className="w-24 h-1 bg-gradient-to-r from-primary to-secondary mx-auto rounded-full"></div>
-            </div>
+      {/* ─── Schemes grid ──────────────────────────────────────────────── */}
+      {(searched || displaySchemes.length > 0) && (
+        <section className="py-16 px-4 relative">
+          <div className="absolute inset-0 -z-10 bg-gradient-to-b from-transparent via-background-secondary/50 to-transparent" />
+          <div className="container mx-auto max-w-6xl">
+            <h2 className="text-2xl md:text-3xl font-bold text-center mb-10">
+              {searched ? (
+                <>
+                  <span className="gradient-text">{t('searchResults')}</span>
+                  <span className="text-text-tertiary text-lg ml-2">({schemes.length})</span>
+                </>
+              ) : (
+                <span className="gradient-text">{t('eligibleSchemes')}</span>
+              )}
+            </h2>
 
             {loading ? (
-              <div className="text-center py-16">
-                <div className="inline-flex flex-col items-center gap-4">
-                  <div className="relative">
-                    <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                    <div className="absolute inset-0 w-16 h-16 border-4 border-transparent border-r-secondary rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1s' }}></div>
-                  </div>
-                  <p className="text-lg text-text-secondary font-medium">{t('loadingSchemes')}</p>
-                </div>
+              <div className="flex justify-center py-16">
+                <div className="w-10 h-10 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
               </div>
-            ) : displaySchemes.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="inline-flex flex-col items-center gap-4 max-w-md">
-                  <div className="w-24 h-24 bg-gradient-to-br from-primary/10 to-secondary/10 rounded-full flex items-center justify-center">
-                    <svg className="w-12 h-12 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </div>
-                  <p className="text-xl font-semibold text-text-primary">
-                    {searchQuery ? t('noSchemesFound') : t('loadingSchemes')}
-                  </p>
-                  <p className="text-sm text-text-secondary">
-                    Try adjusting your search or filters to find more schemes
-                  </p>
-                </div>
-              </div>
+            ) : displaySchemes.length === 0 && webResults.length === 0 ? (
+              <p className="text-center text-text-secondary py-16">{t('noSchemesFound')}</p>
             ) : (
               <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
-                  {displaySchemes.map((scheme) => (
-                    <SchemeCard
-                      key={scheme.id}
-                      scheme={scheme}
-                      onSelect={handleSchemeSelect}
-                      isEligible={true}
-                    />
-                  ))}
-                </div>
-                {hasMore && (
-                  <div className="text-center mt-12">
-                    <div className="inline-flex flex-col items-center gap-4">
-                      <p className="text-text-secondary font-medium">
-                        {t('showing')} <span className="font-bold text-primary">{displaySchemes.length}</span> {t('of')} <span className="font-bold text-secondary">{allSchemes.length}</span>
-                      </p>
-                      <button
-                        className="btn-outline px-10 py-3.5 flex items-center gap-2"
-                        onClick={handleLoadMore}
-                      >
-                        {t('loadMore')}
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                        </svg>
-                      </button>
-                    </div>
+                {displaySchemes.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {displaySchemes.map((s) => (
+                      <SchemeCard
+                        key={s.id}
+                        scheme={s}
+                        onSelect={(id) => {
+                          const found = [...schemes, ...webResults].find((x) => x.id === id);
+                          if (found) setSelectedScheme(found);
+                        }}
+                        isEligible
+                      />
+                    ))}
                   </div>
                 )}
-                {!hasMore && allSchemes.length > ITEMS_PER_PAGE && (
-                  <div className="text-center mt-12">
-                    <div className="inline-flex items-center gap-2 px-6 py-3 bg-accent/10 text-accent rounded-xl font-medium">
-                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+
+                {hasMore && (
+                  <div className="text-center mt-10">
+                    <button onClick={handleLoadMore} className="btn-outline px-8">
+                      {t('loadMore')}
+                    </button>
+                  </div>
+                )}
+
+                {/* Web results section */}
+                {webResults.length > 0 && (
+                  <div className="mt-12">
+                    <h3 className="text-xl font-bold text-text-primary mb-6 flex items-center gap-2">
+                      <svg className="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
                       </svg>
-                      {t('noMoreSchemes')}
+                      Web Results
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                      {webResults.map((s) => (
+                        <article
+                          key={s.id}
+                          className="group relative glass-card glow-border p-5 cursor-pointer transition-all duration-300 hover:-translate-y-1"
+                          onClick={() => s.url && window.open(s.url, '_blank')}
+                        >
+                          <span className="inline-block px-2.5 py-1 bg-secondary/10 text-secondary text-xs font-semibold rounded-md border border-secondary/15 mb-3">
+                            🌐 Web
+                          </span>
+                          <h3 className="text-lg font-bold text-text-primary leading-snug mb-2 line-clamp-2 group-hover:text-primary transition-colors">
+                            {s.name}
+                          </h3>
+                          <p className="text-sm text-text-secondary leading-relaxed line-clamp-3">
+                            {s.description}
+                          </p>
+                        </article>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -422,15 +327,71 @@ const Home: React.FC = () => {
         </section>
       )}
 
-      {/* Scheme Details Modal */}
+      {/* Modal */}
       {selectedScheme && (
-        <SchemeDetailsModal
-          scheme={selectedScheme}
-          onClose={handleCloseModal}
-        />
+        <SchemeDetailsModal scheme={selectedScheme} onClose={() => setSelectedScheme(null)} />
       )}
     </div>
   );
 };
 
 export default Home;
+
+/* ── Tiny helper components ─────────────────────────────────────────────────── */
+
+function Stat({ value, label, color }: { value: number; label: string; color: string }) {
+  return (
+    <div className="text-center">
+      <p className={`text-2xl font-bold ${color}`}>{value}</p>
+      <p className="text-xs text-text-tertiary mt-0.5">{label}</p>
+    </div>
+  );
+}
+
+function Divider() {
+  return <div className="w-px h-10 bg-border-light" />;
+}
+
+function FeatureCard({ icon, title, desc, accent }: { icon: string; title: string; desc: string; accent: string }) {
+  const glowColor = accent === 'primary'
+    ? 'group-hover:shadow-glow'
+    : accent === 'secondary'
+      ? 'group-hover:shadow-glow-pink'
+      : 'group-hover:shadow-[0_0_30px_rgba(52,211,153,0.15)]';
+
+  return (
+    <div className={`group glass-card glow-border p-6 text-center transition-all duration-300 hover:-translate-y-1 ${glowColor}`}>
+      <div className="text-4xl mb-4 animate-float" style={{ animationDelay: `${Math.random() * 2}s` }}>{icon}</div>
+      <h3 className="font-bold text-text-primary text-lg mb-2">{title}</h3>
+      <p className="text-sm text-text-secondary leading-relaxed">{desc}</p>
+    </div>
+  );
+}
+
+interface SelectProps {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  options: string[] | { value: string; label: string }[];
+}
+
+function Select({ value, onChange, placeholder, options }: SelectProps) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-full px-3 py-2.5 rounded-xl border border-border-light bg-surface text-text-primary text-sm
+                 focus:border-primary/50 focus:ring-4 focus:ring-primary/10 outline-none appearance-none cursor-pointer
+                 transition-all shadow-soft"
+    >
+      <option value="">{placeholder}</option>
+      {options.map((opt) =>
+        typeof opt === 'string' ? (
+          <option key={opt} value={opt}>{opt}</option>
+        ) : (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ),
+      )}
+    </select>
+  );
+}

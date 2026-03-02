@@ -119,6 +119,10 @@ python schemes_agent.py --stats
 ### 4. Run the Voice Agent
 
 ```bash
+# Terminal 1 — Token server (generates JWT tokens for frontend → LiveKit)
+python token_server.py
+
+# Terminal 2 — LiveKit voice agent
 python agent.py
 ```
 
