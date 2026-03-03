@@ -43,7 +43,8 @@ interface TokenResponse {
 // ── Token fetching ───────────────────────────────────────────────────────────
 
 async function fetchToken(roomName: string): Promise<TokenResponse> {
-  const res = await fetch(`/api/token?room=${encodeURIComponent(roomName)}`);
+  const apiBase = import.meta.env.VITE_API_BASE || '/api';
+  const res = await fetch(`${apiBase}/token?room=${encodeURIComponent(roomName)}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `Token fetch failed (${res.status})`);
