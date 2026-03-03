@@ -164,9 +164,9 @@ RESPONSE STYLE:
   robot reading a list.
 
 SCHEME DISCOVERY — DO NOT JUST LIST SCHEMES:
-1. When a user describes a need, call `search_schemes`. This automatically
-   fetches from the database AND pre-fetches detailed web info in parallel,
-   so follow-up detail requests are instant.
+1. When a user describes a need, call `search_schemes`. This searches the
+   LOCAL DATABASE first (instant, <50ms). It only falls back to web search
+   if the database has zero results.
 2. NEVER invent scheme names — always use a tool.
 3. **DO NOT dump a list of 3-5 schemes and ask "which one do you want?"**
    Instead, use the results internally and ASK THE USER QUESTIONS to figure
@@ -183,16 +183,31 @@ SCHEME DISCOVERY — DO NOT JUST LIST SCHEMES:
 5. If the search returns NO database results but includes web_details,
    use those web findings to help the user.
 6. When the user asks for details on a specific scheme, call
-   `get_scheme_details` — it checks DB first and enriches from the web
-   in parallel, so you'll have comprehensive info instantly.
+   `get_scheme_details` — it checks the local DB first (instant) and
+   only searches the web if the scheme is not in the database.
 
-**HANDLING SLOW OPERATIONS — CRITICAL:**
+**TOOL PRIORITY — CRITICAL FOR SPEED:**
+- ALWAYS use `search_schemes` and `get_scheme_details` FIRST — they hit
+  the local database and return in milliseconds.
+- ONLY use `web_search` or `smart_answer` when:
+  (a) The user EXPLICITLY asks for detailed/in-depth information
+      (e.g. "tell me more", "give me full details", "what documents do I need")
+  (b) The user asks about recent updates, deadlines, or news
+  (c) The local database returned no results
+  (d) The user explicitly asks you to search the web
+- NEVER call `web_search` to look up a scheme that `search_schemes` can find.
+- For basic questions (what is this scheme, am I eligible, how to apply),
+  answer from DB results WITHOUT searching the web.
+
+**HANDLING SLOW OPERATIONS — ABSOLUTELY MANDATORY:**
 Before calling `web_search`, `smart_answer`, or any tool that may take
-a few seconds, FIRST say something brief like:
-- "Let me look that up for you..."
-- "One moment, checking that..."
-- "Searching for the latest info..."
-This prevents awkward silence.
+a few seconds, you MUST FIRST speak a brief message like:
+- "Let me search the web for that..."
+- "One moment, I'm looking up the details..."
+- "Searching for the latest info, just a second..."
+You MUST say this BEFORE the tool call, NOT after. This is critical
+because web searches take several seconds and the user will hear
+silence otherwise. ALWAYS speak first, THEN call the tool.
 
 GOVERNMENT SERVICES (within scope):
 - Aadhaar, PAN, ration card, voter ID, passport, driving license,
@@ -301,32 +316,45 @@ class Assistant(Agent):
         log.info("Tool call: search_schemes(query=%r, state=%r, category=%r, level=%r)",
                  query, state, category, level)
 
-        # ── Run DB search AND web pre-fetch in parallel ──────────────────
-        async def _db_search():
-            return scheme_lookup.search_schemes(
-                query=query,
-                state=state or None,
-                category=category or None,
-                level=level or None,
-                limit=10,
+        # ── Search local DB first (fast, <50ms) ─────────────────────────
+        results = scheme_lookup.search_schemes(
+            query=query,
+            state=state or None,
+            category=category or None,
+            level=level or None,
+            limit=10,
+        )
+
+        if results:
+            schemes_out = []
+            for r in results:
+                schemes_out.append({
+                    "name": r["scheme_name"],
+                    "description": r["description"][:200],
+                    "ministry": r["ministry"],
+                    "level": r["level"],
+                    "apply_url": r["url"],
+                })
+
+            self._mem.save_search(
+                query,
+                {"state": state, "category": category, "level": level},
+                schemes_out,
             )
+            return json.dumps({"found": len(schemes_out), "schemes": schemes_out}, ensure_ascii=False)
 
-        async def _web_prefetch():
-            """Pre-fetch detailed web info so follow-up detail requests are instant."""
-            try:
-                web_query = f"Indian government scheme {query} eligibility benefits how to apply"
-                if state:
-                    web_query += f" {state}"
-                return await asyncio.to_thread(self._sync_web_search, web_query, 5)
-            except Exception as e:
-                log.warning("Web prefetch failed: %s", e)
-                return []
+        # ── DB returned nothing — fall back to web search ────────────────
+        log.info("No DB results for '%s', falling back to web.", query)
+        self._mem.save_search(query, {"state": state, "category": category, "level": level}, [])
 
-        results, web_details = await asyncio.gather(_db_search(), _web_prefetch())
-
-        if not results:
-            log.info("No DB results for '%s', using web fallback.", query)
-            self._mem.save_search(query, {"state": state, "category": category, "level": level}, [])
+        try:
+            web_query = f"Indian government scheme {query}"
+            if state:
+                web_query += f" {state}"
+            web_details = await asyncio.wait_for(
+                asyncio.to_thread(self._sync_web_search, web_query, 5),
+                timeout=8.0,
+            )
             if web_details:
                 return json.dumps({
                     "found": 0,
@@ -335,33 +363,15 @@ class Assistant(Agent):
                     "message": "No exact matches in our database, but I found relevant info from the web.",
                     "web_results": web_details,
                 }, ensure_ascii=False)
-            return json.dumps({
-                "found": 0,
-                "message": "No schemes found. Try different keywords or ask me to search the web."
-            })
+        except asyncio.TimeoutError:
+            log.warning("Web fallback timed out for '%s'", query)
+        except Exception as e:
+            log.warning("Web fallback failed: %s", e)
 
-        schemes_out = []
-        for r in results:
-            schemes_out.append({
-                "name": r["scheme_name"],
-                "description": r["description"][:200],
-                "ministry": r["ministry"],
-                "level": r["level"],
-                "apply_url": r["url"],
-            })
-
-        self._mem.save_search(
-            query,
-            {"state": state, "category": category, "level": level},
-            schemes_out,
-        )
-
-        payload = {"found": len(schemes_out), "schemes": schemes_out}
-        # Attach pre-fetched web details so the model has rich info immediately
-        if web_details:
-            payload["web_details"] = web_details[:4]
-
-        return json.dumps(payload, ensure_ascii=False)
+        return json.dumps({
+            "found": 0,
+            "message": "No schemes found. Try different keywords or broader terms."
+        })
 
     @function_tool(description=(
         "Re-run the LAST search with additional or updated filters. Use this "
@@ -440,10 +450,16 @@ class Assistant(Agent):
         """
         log.info("Tool call: web_search(query=%r)", query)
         try:
-            results = await asyncio.to_thread(self._sync_web_search, query, 5)
+            results = await asyncio.wait_for(
+                asyncio.to_thread(self._sync_web_search, query, 5),
+                timeout=8.0,
+            )
             if not results:
                 return json.dumps({"found": 0, "message": "No web results found."})
             return json.dumps({"found": len(results), "results": results}, ensure_ascii=False)
+        except asyncio.TimeoutError:
+            log.warning("Web search timed out for '%s'", query)
+            return json.dumps({"error": "Web search timed out. Try a simpler query."})
         except Exception as e:
             log.error("Web search failed: %s", e)
             return json.dumps({"error": f"Web search failed: {e}"})
@@ -461,69 +477,52 @@ class Assistant(Agent):
         "about PM-KISAN', 'what are PMAY benefits?'). Pass the scheme name or slug."
     ))
     async def get_scheme_details(self, scheme_name: str) -> str:
-        """Fetch full details for a specific scheme. Runs DB + web in parallel for speed.
+        """Fetch full details for a specific scheme. Checks local DB first, web only if needed.
 
         Args:
             scheme_name: The scheme name or slug (e.g. 'PM-KISAN', 'Pradhan Mantri Awas Yojana', 'pmay-u').
         """
         log.info("Tool call: get_scheme_details(scheme_name=%r)", scheme_name)
 
-        # ── Run local DB lookup AND web search in PARALLEL ───────────────
-        async def _local_lookup():
-            local = scheme_lookup.get_scheme_by_name(scheme_name)
-            if not local:
-                local = scheme_lookup.get_scheme_by_slug(scheme_name)
-            if not local:
-                # Check search history
-                last = self._mem.get_last_search()
-                if last:
-                    for s in last["results"]:
-                        if scheme_name.lower() in s.get("name", "").lower():
-                            return s
-            return local
-
-        async def _web_detail():
-            try:
-                q1 = f"{scheme_name} scheme benefits eligibility how to apply myscheme.gov.in"
-                q2 = f"{scheme_name} scheme documents required application process India"
-                r1, r2 = await asyncio.gather(
-                    asyncio.to_thread(self._sync_web_search, q1, 4),
-                    asyncio.to_thread(self._sync_web_search, q2, 4),
-                )
-                all_results = (r1 or []) + (r2 or [])
-                seen: set[str] = set()
-                unique = []
-                for r in all_results:
-                    url = r.get("href", "")
-                    if url not in seen:
-                        seen.add(url)
-                        unique.append(r)
-                return unique[:6]
-            except Exception as e:
-                log.warning("Web detail search failed: %s", e)
-                return []
-
-        local, web_results = await asyncio.gather(_local_lookup(), _web_detail())
+        # ── Try local DB first (fast) ────────────────────────────────────
+        local = scheme_lookup.get_scheme_by_name(scheme_name)
+        if not local:
+            local = scheme_lookup.get_scheme_by_slug(scheme_name)
+        if not local:
+            # Check search history
+            last = self._mem.get_last_search()
+            if last:
+                for s in last["results"]:
+                    if scheme_name.lower() in s.get("name", "").lower():
+                        local = s
+                        break
 
         if local:
-            result = {
+            return json.dumps({
                 "scheme": scheme_name,
                 "source": "local_database",
                 "details": local,
-            }
-            if web_results:
-                result["web_enrichment"] = web_results
-                result["tip"] = ("Use web_enrichment for additional details like latest updates, "
-                                 "step-by-step application process, and documents required.")
-            return json.dumps(result, ensure_ascii=False)
-
-        if web_results:
-            return json.dumps({
-                "scheme": scheme_name,
-                "source": "web_search",
-                "web_results": web_results,
-                "tip": "Summarize: benefits, eligibility, documents, how to apply."
             }, ensure_ascii=False)
+
+        # ── DB miss — fall back to web search with timeout ───────────────
+        log.info("Scheme '%s' not in DB, searching web.", scheme_name)
+        try:
+            q = f"{scheme_name} scheme benefits eligibility how to apply myscheme.gov.in"
+            web_results = await asyncio.wait_for(
+                asyncio.to_thread(self._sync_web_search, q, 5),
+                timeout=8.0,
+            )
+            if web_results:
+                return json.dumps({
+                    "scheme": scheme_name,
+                    "source": "web_search",
+                    "web_results": web_results,
+                    "tip": "Summarize: benefits, eligibility, documents, how to apply."
+                }, ensure_ascii=False)
+        except asyncio.TimeoutError:
+            log.warning("Web detail search timed out for '%s'", scheme_name)
+        except Exception as e:
+            log.warning("Web detail search failed: %s", e)
 
         return json.dumps({
             "error": f"Could not find details for '{scheme_name}'. "
@@ -552,11 +551,17 @@ class Assistant(Agent):
         try:
             # Build a focused search query
             search_query = f"{question} India government official"
-            results = await asyncio.to_thread(self._sync_web_search, search_query, 6)
+            results = await asyncio.wait_for(
+                asyncio.to_thread(self._sync_web_search, search_query, 5),
+                timeout=8.0,
+            )
 
             if not results:
                 # Try a broader search
-                results = await asyncio.to_thread(self._sync_web_search, question, 5)
+                results = await asyncio.wait_for(
+                    asyncio.to_thread(self._sync_web_search, question, 5),
+                    timeout=8.0,
+                )
 
             if not results:
                 return json.dumps({
@@ -571,6 +576,9 @@ class Assistant(Agent):
                 "instruction": "Summarize the most relevant information from these results "
                                "in a clear, helpful way. Give step-by-step guidance if applicable."
             }, ensure_ascii=False)
+        except asyncio.TimeoutError:
+            log.warning("smart_answer timed out for '%s'", question)
+            return json.dumps({"error": "Search timed out. Try asking in a simpler way."})
         except Exception as e:
             log.error("smart_answer failed: %s", e)
             return json.dumps({"error": f"Search failed: {e}"})
