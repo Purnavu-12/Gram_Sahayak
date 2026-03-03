@@ -6,11 +6,14 @@
 
 import { Scheme } from '../types';
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_BASE = '/api';
 
 async function apiFetch<T>(path: string, fallback: T): Promise<T> {
   try {
-    const res = await fetch(`${API_BASE}${path}`);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(`${API_BASE}${path}`, { signal: controller.signal });
+    clearTimeout(timeout);
     if (!res.ok) throw new Error(`API ${res.status}`);
     return (await res.json()) as T;
   } catch (err) {

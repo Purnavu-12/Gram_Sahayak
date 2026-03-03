@@ -42,14 +42,28 @@ interface TokenResponse {
 
 // ── Token fetching ───────────────────────────────────────────────────────────
 
-async function fetchToken(roomName: string): Promise<TokenResponse> {
-  const apiBase = import.meta.env.VITE_API_BASE || '/api';
-  const res = await fetch(`${apiBase}/token?room=${encodeURIComponent(roomName)}`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Token fetch failed (${res.status})`);
+async function fetchToken(roomName: string, retries = 2): Promise<TokenResponse> {
+  const apiBase = '/api';
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const res = await fetch(`${apiBase}/token?room=${encodeURIComponent(roomName)}`, {
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Token fetch failed (${res.status})`);
+      }
+      return res.json();
+    } catch (err) {
+      if (attempt === retries) throw err;
+      console.warn(`[Voice] Token fetch attempt ${attempt + 1} failed, retrying...`);
+      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+    }
   }
-  return res.json();
+  throw new Error('Token fetch failed after retries');
 }
 
 // ── LiveKit Voice Service ────────────────────────────────────────────────────
