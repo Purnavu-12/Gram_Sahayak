@@ -38,7 +38,7 @@ const VoiceButton: React.FC<VoiceButtonProps> = ({
 
     // Connect
     try {
-      await voice.connect('gram-sahayak', {
+      await voice.connect({
         onStatusChange: (s) => setStatus(s),
         onAgentConnected: () => console.log('Agent joined the room'),
         onAgentDisconnected: () => console.log('Agent left the room'),

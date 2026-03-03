@@ -596,9 +596,9 @@ async def my_agent(ctx: agents.JobContext):
             enable_affective_dialog=True,
             realtime_input_config=types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                    silence_duration_ms=800,
-                    prefix_padding_ms=300,
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                    silence_duration_ms=500,
+                    prefix_padding_ms=200,
                 ),
             ),
             conn_options=agents.APIConnectOptions(
@@ -608,10 +608,10 @@ async def my_agent(ctx: agents.JobContext):
             ),
         ),
         allow_interruptions=True,
-        min_interruption_duration=1.0,
-        min_interruption_words=2,
-        min_endpointing_delay=0.8,
-        max_endpointing_delay=5.0,
+        min_interruption_duration=0.6,
+        min_interruption_words=1,
+        min_endpointing_delay=0.5,
+        max_endpointing_delay=3.0,
     )
 
     await session.start(
@@ -625,7 +625,7 @@ async def my_agent(ctx: agents.JobContext):
                 sample_rate=24000,
                 num_channels=1,
                 track_publish_options=rtc.TrackPublishOptions(
-                    dtx=False,
+                    dtx=True,
                     red=True,
                 ),
             ),

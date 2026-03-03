@@ -74,9 +74,16 @@ class LiveKitVoiceService {
   private callbacks: VoiceCallbacks = {};
   private _status: VoiceStatus = 'idle';
 
+  /** Unique room name for this user session — prevents voice crossover */
+  private _roomName: string;
+
   /** Pre-warmed token + url cached from page load */
   private _warmToken: Promise<TokenResponse> | null = null;
   private _warmRoom: Room | null = null;
+
+  constructor() {
+    this._roomName = `gram-sahayak-${crypto.randomUUID()}`;
+  }
 
   get status(): VoiceStatus {
     return this._status;
@@ -91,11 +98,11 @@ class LiveKitVoiceService {
    * Pre-warm: fetch token + create Room object ahead of time.
    * Call this on page load so the mic button press is near-instant.
    */
-  preWarm(roomName: string = 'gram-sahayak'): void {
+  preWarm(): void {
     if (this._warmToken) return; // already warming
 
-    console.log('[Voice] Pre-warming token + room...');
-    this._warmToken = fetchToken(roomName).catch((err) => {
+    console.log('[Voice] Pre-warming token + room for', this._roomName);
+    this._warmToken = fetchToken(this._roomName).catch((err) => {
       console.warn('[Voice] Pre-warm token fetch failed:', err);
       this._warmToken = null;
       throw err;
@@ -119,9 +126,9 @@ class LiveKitVoiceService {
 
   /**
    * Start a voice session — uses pre-warmed token/room if available.
+   * Requests mic permission early (within user gesture) for mobile compatibility.
    */
   async connect(
-    roomName: string = 'gram-sahayak',
     callbacks: VoiceCallbacks = {},
   ): Promise<void> {
     if (this.room) {
@@ -133,7 +140,28 @@ class LiveKitVoiceService {
     this.setStatus('connecting');
 
     try {
+      // 0. Request mic permission FIRST (within user gesture for mobile)
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Stop the tracks immediately — LiveKit will request its own
+        stream.getTracks().forEach((t) => t.stop());
+      } catch (micErr) {
+        console.error('[Voice] Mic permission denied:', micErr);
+        throw new Error('Microphone permission denied. Please allow mic access.');
+      }
+
+      // Resume AudioContext for mobile browsers that block autoplay
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          await ctx.resume();
+          ctx.close();
+        }
+      } catch { /* ignore */ }
+
       // 1. Use pre-warmed token or fetch fresh
+      const roomName = this._roomName;
       let tokenData: TokenResponse;
       if (this._warmToken) {
         try {
@@ -196,6 +224,9 @@ class LiveKitVoiceService {
 
     this.cleanup();
     this.setStatus('idle');
+
+    // Generate a fresh room name for the next session
+    this._roomName = `gram-sahayak-${crypto.randomUUID()}`;
 
     // Pre-warm again for next session
     this.preWarm();
