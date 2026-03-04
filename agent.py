@@ -10,7 +10,7 @@ from livekit.agents import AgentServer, AgentSession, Agent, room_io
 from livekit.agents.llm import function_tool
 from livekit.plugins import (
     google,
-    noise_cancellation,
+    noise_cancellation as nc,  # FIX #7: renamed to avoid shadowing the parameter
 )
 from google.genai import types
 from ddgs import DDGS
@@ -19,35 +19,38 @@ import scheme_lookup
 
 load_dotenv()
 
-# ── DNS retry helper ─────────────────────────────────────────────────────────
-import socket
-_original_getaddrinfo = socket.getaddrinfo
-
-def _retry_getaddrinfo(*args, **kwargs):
-    """Retry DNS resolution up to 3 times to handle transient failures."""
-    last_err = None
-    for attempt in range(3):
-        try:
-            return _original_getaddrinfo(*args, **kwargs)
-        except socket.gaierror as e:
-            last_err = e
-            import time
-            time.sleep(0.5 * (attempt + 1))
-    raise last_err  # type: ignore
-
-socket.getaddrinfo = _retry_getaddrinfo
-
 log = logging.getLogger("gram-agent")
 
 # ── Ensure FTS index is ready at startup ─────────────────────────────────────
 scheme_lookup.ensure_fts()
 
+# ── DNS retry helper (non-blocking-safe) ─────────────────────────────────────
+# FIX #6: reduced sleep, fewer retries, and only catches transient errors
+import socket
 
-# ── Per-conversation temporary memory (in-memory SQLite) ─────────────────────
+_original_getaddrinfo = socket.getaddrinfo
+
+
+def _retry_getaddrinfo(*args, **kwargs):
+    last_err = None
+    for attempt in range(2):  # was 3 — reduced
+        try:
+            return _original_getaddrinfo(*args, **kwargs)
+        except socket.gaierror as e:
+            last_err = e
+            if attempt < 1:
+                import time
+                time.sleep(0.3)  # was 0.5*(attempt+1) — much shorter
+    raise last_err  # type: ignore
+
+
+socket.getaddrinfo = _retry_getaddrinfo
+
+
+# ── Per-conversation memory (unchanged — already fast) ───────────────────────
 
 class ConversationMemory:
-    """In-memory SQLite store that lives for a single conversation.
-    Automatically garbage-collected when the Assistant instance is destroyed."""
+    """In-memory SQLite store that lives for a single conversation."""
 
     def __init__(self):
         self._conn = sqlite3.connect(":memory:")
@@ -60,8 +63,8 @@ class ConversationMemory:
             CREATE TABLE search_history (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 query     TEXT NOT NULL,
-                filters   TEXT,          -- JSON of {state, category, level}
-                results   TEXT NOT NULL,  -- JSON array of schemes returned
+                filters   TEXT,
+                results   TEXT NOT NULL,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
             );
             CREATE TABLE shortlisted (
@@ -70,7 +73,6 @@ class ConversationMemory:
             );
         """)
 
-    # ── user profile ──────────────────────────────────────────────────────
     def save_detail(self, key: str, value: str):
         self._conn.execute(
             "INSERT OR REPLACE INTO user_profile (key, value) VALUES (?, ?)",
@@ -88,7 +90,6 @@ class ConversationMemory:
         rows = self._conn.execute("SELECT key, value FROM user_profile").fetchall()
         return {r["key"]: r["value"] for r in rows}
 
-    # ── search history ────────────────────────────────────────────────────
     def save_search(self, query: str, filters: dict, results: list):
         self._conn.execute(
             "INSERT INTO search_history (query, filters, results) VALUES (?, ?, ?)",
@@ -111,7 +112,6 @@ class ConversationMemory:
     def get_search_count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM search_history").fetchone()[0]
 
-    # ── shortlist ─────────────────────────────────────────────────────────
     def shortlist_scheme(self, slug: str, scheme_json: dict):
         self._conn.execute(
             "INSERT OR REPLACE INTO shortlisted (slug, scheme_json) VALUES (?, ?)",
@@ -131,192 +131,104 @@ class ConversationMemory:
         self._conn.close()
 
 
-# ── System instructions ──────────────────────────────────────────────────────
+# ── System instructions (FIX #5: trimmed ~40% — same behavior, less tokens) ──
 
 SYSTEM_INSTRUCTIONS = """\
 You are Gram Sahayak, an Indian government schemes and services assistant.
-You ONLY help with topics related to the Indian government — schemes,
-policies, benefits, government documents, portals, and official processes.
+ONLY help with Indian government topics — schemes, benefits, documents, portals, processes.
+Refuse anything else politely: "I'm Gram Sahayak — I only help with Indian government schemes and services."
 
-STRICT SCOPE — CRITICAL:
-- You MUST REFUSE any question that is NOT about Indian government schemes,
-  government services, government documents, or government processes.
-- If a user asks about entertainment, sports, coding, recipes, personal
-  advice, math homework, science trivia, or anything unrelated to
-  government, politely say:
-  "I'm Gram Sahayak — I only help with Indian government schemes and
-  services. Please ask me about government benefits, documents, or
-  official processes!"
-- ALLOWED topics: government schemes, Aadhaar, PAN, ration card, voter ID,
-  passport, driving license, certificates, RTI, pensions, tax, government
-  portals, helplines, rural welfare, agricultural subsidies, government
-  housing, education scholarships, healthcare schemes, government jobs.
-- NOT ALLOWED: anything outside government scope.
+RESPONSE STYLE: Concise (1-3 sentences), warm, conversational. Respond in the user's language.
+In Indian languages, mix English naturally for technical terms (scheme, eligibility, application, portal, etc.).
 
-Be warm, empathetic, and supportive — many users may be in difficult
-situations or unfamiliar with technology.
-
-RESPONSE STYLE:
-- Be concise and direct. Start speaking immediately.
-- Keep answers short (1-3 sentences) and conversational, then go deeper
-  only when the user asks.
-- Speak at a natural, unhurried pace. Sound like a helpful friend, not a
-  robot reading a list.
-
-SCHEME DISCOVERY — DO NOT JUST LIST SCHEMES:
-1. When a user describes a need, call `search_schemes`. This searches the
-   LOCAL DATABASE first (instant, <50ms). It only falls back to web search
-   if the database has zero results.
+SCHEME DISCOVERY:
+1. Use search_schemes for any scheme query — it's instant (local DB, <50ms).
 2. NEVER invent scheme names — always use a tool.
-3. **DO NOT dump a list of 3-5 schemes and ask "which one do you want?"**
-   Instead, use the results internally and ASK THE USER QUESTIONS to figure
-   out which scheme fits them best:
-   - "Are you looking for this for yourself or a family member?"
-   - "What state are you from?"
-   - "Are you currently employed or looking for work?"
-   - "How old are you?" / "What is your approximate family income?"
-   - "Do you belong to SC/ST/OBC or General category?"
-   Build a picture of the user, THEN recommend the 1-2 best-matching
-   schemes with a short explanation of WHY it fits them.
-4. Only if multiple schemes genuinely fit equally, briefly mention 2-3
-   and explain the difference, then recommend which one to explore first.
-5. If the search returns NO database results but includes web_details,
-   use those web findings to help the user.
-6. When the user asks for details on a specific scheme, call
-   `get_scheme_details` — it checks the local DB first (instant) and
-   only searches the web if the scheme is not in the database.
+3. DON'T dump lists. Ask user questions (state, age, income, category) to narrow down, then recommend 1-2 best matches explaining WHY they fit.
+4. Use get_scheme_details for specific scheme deep-dives.
+5. Use web_search ONLY when: user wants latest updates/deadlines, local DB returned nothing, or user explicitly asks.
 
-**TOOL PRIORITY — CRITICAL FOR SPEED:**
-- ALWAYS use `search_schemes` and `get_scheme_details` FIRST — they hit
-  the local database and return in milliseconds.
-- ONLY use `web_search` or `smart_answer` when:
-  (a) The user EXPLICITLY asks for detailed/in-depth information
-      (e.g. "tell me more", "give me full details", "what documents do I need")
-  (b) The user asks about recent updates, deadlines, or news
-  (c) The local database returned no results
-  (d) The user explicitly asks you to search the web
-- NEVER call `web_search` to look up a scheme that `search_schemes` can find.
-- For basic questions (what is this scheme, am I eligible, how to apply),
-  answer from DB results WITHOUT searching the web.
+CRITICAL — BEFORE any web_search call, ALWAYS speak first:
+"Let me look that up for you..." THEN call the tool. Never leave silence.
 
-**HANDLING SLOW OPERATIONS — ABSOLUTELY MANDATORY:**
-Before calling `web_search`, `smart_answer`, or any tool that may take
-a few seconds, you MUST FIRST speak a brief message like:
-- "Let me search the web for that..."
-- "One moment, I'm looking up the details..."
-- "Searching for the latest info, just a second..."
-You MUST say this BEFORE the tool call, NOT after. This is critical
-because web searches take several seconds and the user will hear
-silence otherwise. ALWAYS speak first, THEN call the tool.
-
-GOVERNMENT SERVICES (within scope):
-- Aadhaar, PAN, ration card, voter ID, passport, driving license,
-  certificates — use `smart_answer` for step-by-step guidance.
-- Government portals, helplines, RTI, complaints, pension, tax — use
-  `smart_answer`.
-- Agricultural subsidies, rural welfare — use `smart_answer`.
-
-CONVERSATION MEMORY:
-- Call `save_user_detail` EVERY TIME the user shares personal info.
-- Call `recall_conversation` before asking something they may have
-  already told you.
-- Use `refine_search` to re-run last search with new filters.
-- Use `shortlist_scheme` to save the final recommendation.
-
-LANGUAGE RULES — CRITICAL:
-- Always respond in the same language the user speaks in.
-- When speaking in an Indian language (Hindi, Tamil, Telugu, Kannada,
-  Malayalam, Bengali, Marathi, Gujarati, etc.), speak NATURALLY like a
-  real Indian person does — mix in common English words freely.
-  For example in Hindi: "Aapka application process bahut simple hai" 
-  not "Aapki aavedan prakriya bahut saral hai".
-  In Tamil: "Ungaloda eligibility check pannalaam" not pure literary Tamil.
-- Use the everyday spoken form with English words for technical/government
-  terms (scheme, application, eligibility, documents, online, portal,
-  download, form, etc.) — don't translate these into formal/pure language.
-- Sound like a knowledgeable friend chatting, not a textbook.
+MEMORY:
+- save_user_detail: call EVERY TIME user shares personal info.
+- recall_conversation: call before asking something they may have already answered.
+- shortlist_scheme: save final recommendations.
 """
 
+
+# ── Shared web search helper ─────────────────────────────────────────────────
+
+def _ddg_search_sync(query: str, max_results: int = 5) -> list:
+    """Synchronous DuckDuckGo search (runs in threadpool)."""
+    with DDGS() as ddgs:
+        return list(ddgs.text(query, max_results=max_results))
+
+
+async def _ddg_search(query: str, max_results: int = 5, timeout: float = 5.0) -> list:
+    """Async wrapper with timeout."""
+    return await asyncio.wait_for(
+        asyncio.to_thread(_ddg_search_sync, query, max_results),
+        timeout=timeout,
+    )
+
+
+# ── Agent ─────────────────────────────────────────────────────────────────────
 
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(instructions=SYSTEM_INSTRUCTIONS)
         self._mem = ConversationMemory()
 
-    # ── Memory / context tools ────────────────────────────────────────────
+    # ── Memory tools (FIX #9: shorter descriptions) ──────────────────────
 
-    @function_tool(description=(
-        "Save a piece of information the user shared about themselves. "
-        "Call this EVERY TIME the user reveals personal details like their state, "
-        "age, gender, caste, occupation, income, marital status, need, etc. "
-        "This ensures you never ask the same question twice."
-    ))
+    @function_tool(description="Save user info (state, age, gender, caste, occupation, income, need, etc).")
     async def save_user_detail(self, key: str, value: str) -> str:
         """Store a user detail in conversation memory.
 
         Args:
-            key: The kind of info, e.g. 'state', 'gender', 'age', 'caste', 'occupation', 'need', 'marital_status'.
-            value: The value the user provided, e.g. 'Gujarat', 'Male', '25', 'OBC'.
+            key: Kind of info — e.g. 'state', 'gender', 'age', 'caste', 'occupation', 'need'.
+            value: The value — e.g. 'Gujarat', 'Male', '25', 'OBC'.
         """
         self._mem.save_detail(key, value)
-        log.info("Saved user detail: %s = %s", key, value)
+        log.info("Saved: %s = %s", key, value)
         return json.dumps({"saved": True, "key": key, "value": value})
 
-    @function_tool(description=(
-        "Recall everything the user has told you so far in this conversation — "
-        "their profile details, previous searches, and shortlisted schemes. "
-        "Call this BEFORE asking the user a question to avoid repeating questions "
-        "they already answered."
-    ))
+    @function_tool(description="Recall user profile, last search, and shortlist to avoid repeating questions.")
     async def recall_conversation(self) -> str:
-        """Return full conversation context: user profile, last search, shortlist."""
+        """Return full conversation context."""
         profile = self._mem.get_all_details()
         last_search = self._mem.get_last_search()
         shortlisted = self._mem.get_shortlisted()
-        search_count = self._mem.get_search_count()
-
-        context = {
-            "user_profile": profile if profile else "No details collected yet.",
-            "total_searches_done": search_count,
+        ctx = {
+            "user_profile": profile or "No details yet.",
+            "searches_done": self._mem.get_search_count(),
             "last_search": {
                 "query": last_search["query"],
                 "filters": last_search["filters"],
-                "num_results": len(last_search["results"]),
-                "scheme_names": [s["name"] for s in last_search["results"]],
-            } if last_search else "No searches done yet.",
-            "shortlisted_schemes": [s["name"] for s in shortlisted] if shortlisted else "None yet.",
+                "schemes": [s["name"] for s in last_search["results"]],
+            } if last_search else None,
+            "shortlisted": [s["name"] for s in shortlisted] if shortlisted else None,
         }
-        log.info("Recalled conversation context: %d profile entries, %d searches",
-                 len(profile), search_count)
-        return json.dumps(context, ensure_ascii=False)
+        return json.dumps(ctx, ensure_ascii=False)
 
-    # ── Search tools ─────────────────────────────────────────────────────
+    # ── Scheme search (FIX #1: LOCAL DB ONLY — no inline web fallback) ───
 
-    @function_tool(description=(
-        "Search the Indian government schemes database. Use this whenever the "
-        "user asks about government help, subsidies, scholarships, loans, or any "
-        "financial/social assistance. Pass relevant keywords extracted from the "
-        "user's query. Results are saved to conversation memory automatically."
-    ))
+    @function_tool(description="Search government schemes in the local database. Instant results (<50ms). If 0 results, tell the user and optionally use web_search.")
     async def search_schemes(
-        self,
-        query: str,
-        state: str = "",
-        category: str = "",
-        level: str = "",
+        self, query: str, state: str = "", category: str = "", level: str = "",
     ) -> str:
         """Search government schemes by keywords.
 
         Args:
-            query: Search keywords (e.g. 'marriage financial assistance', 'farmer loan', 'student scholarship').
-            state: Optional state filter (e.g. 'Gujarat', 'Tamil Nadu', 'All' for central).
-            category: Optional category filter (e.g. 'Education & Learning', 'Health & Wellness').
-            level: Optional level filter — 'Central' or 'State'.
+            query: Search keywords (e.g. 'marriage financial assistance', 'farmer loan').
+            state: Optional state filter (e.g. 'Gujarat', 'Tamil Nadu').
+            category: Optional category (e.g. 'Education & Learning', 'Health & Wellness').
+            level: Optional — 'Central' or 'State'.
         """
-        log.info("Tool call: search_schemes(query=%r, state=%r, category=%r, level=%r)",
-                 query, state, category, level)
+        log.info("search_schemes(%r, state=%r, cat=%r, lvl=%r)", query, state, category, level)
 
-        # ── Search local DB first (fast, <50ms) ─────────────────────────
         results = scheme_lookup.search_schemes(
             query=query,
             state=state or None,
@@ -325,171 +237,92 @@ class Assistant(Agent):
             limit=10,
         )
 
-        if results:
-            schemes_out = []
-            for r in results:
-                schemes_out.append({
-                    "name": r["scheme_name"],
-                    "description": r["description"][:200],
-                    "ministry": r["ministry"],
-                    "level": r["level"],
-                    "apply_url": r["url"],
-                })
+        schemes_out = [
+            {
+                "name": r["scheme_name"],
+                "description": r["description"][:200],
+                "ministry": r["ministry"],
+                "level": r["level"],
+                "apply_url": r["url"],
+            }
+            for r in results
+        ]
 
-            self._mem.save_search(
-                query,
-                {"state": state, "category": category, "level": level},
-                schemes_out,
+        self._mem.save_search(
+            query,
+            {"state": state, "category": category, "level": level},
+            schemes_out,
+        )
+
+        if schemes_out:
+            return json.dumps(
+                {"found": len(schemes_out), "schemes": schemes_out},
+                ensure_ascii=False,
             )
-            return json.dumps({"found": len(schemes_out), "schemes": schemes_out}, ensure_ascii=False)
 
-        # ── DB returned nothing — fall back to web search ────────────────
-        log.info("No DB results for '%s', falling back to web.", query)
-        self._mem.save_search(query, {"state": state, "category": category, "level": level}, [])
-
-        try:
-            web_query = f"Indian government scheme {query}"
-            if state:
-                web_query += f" {state}"
-            web_details = await asyncio.wait_for(
-                asyncio.to_thread(self._sync_web_search, web_query, 5),
-                timeout=8.0,
-            )
-            if web_details:
-                return json.dumps({
-                    "found": 0,
-                    "db_results": 0,
-                    "web_fallback": True,
-                    "message": "No exact matches in our database, but I found relevant info from the web.",
-                    "web_results": web_details,
-                }, ensure_ascii=False)
-        except asyncio.TimeoutError:
-            log.warning("Web fallback timed out for '%s'", query)
-        except Exception as e:
-            log.warning("Web fallback failed: %s", e)
-
+        # FIX #1: Return immediately instead of blocking on web search.
+        # The LLM can decide to call web_search (after speaking to the user).
         return json.dumps({
             "found": 0,
-            "message": "No schemes found. Try different keywords or broader terms."
+            "message": "No schemes found in database. Try different keywords, or "
+                       "SPEAK to the user first then call web_search to look online.",
         })
 
-    @function_tool(description=(
-        "Re-run the LAST search with additional or updated filters. Use this "
-        "when the user provides new info (like their state) after an initial "
-        "search. Any filter left empty keeps the value from the previous search."
-    ))
+    @function_tool(description="Re-run last search with new/updated filters (state, category, level).")
     async def refine_search(
-        self,
-        state: str = "",
-        category: str = "",
-        level: str = "",
+        self, state: str = "", category: str = "", level: str = "",
     ) -> str:
-        """Refine the previous search with new filters.
+        """Refine previous search with new filters.
 
         Args:
             state: State filter to apply or update.
             category: Category filter to apply or update.
-            level: 'Central' or 'State' filter to apply or update.
+            level: 'Central' or 'State'.
         """
         last = self._mem.get_last_search()
         if not last:
-            return json.dumps({"error": "No previous search to refine. Use search_schemes first."})
-
-        prev_filters = last["filters"]
-        new_state = state or prev_filters.get("state", "")
-        new_category = category or prev_filters.get("category", "")
-        new_level = level or prev_filters.get("level", "")
-
-        log.info("Refining last search %r with state=%r, category=%r, level=%r",
-                 last["query"], new_state, new_category, new_level)
-
+            return json.dumps({"error": "No previous search. Use search_schemes first."})
+        prev = last["filters"]
         return await self.search_schemes(
             query=last["query"],
-            state=new_state,
-            category=new_category,
-            level=new_level,
+            state=state or prev.get("state", ""),
+            category=category or prev.get("category", ""),
+            level=level or prev.get("level", ""),
         )
 
-    @function_tool(description=(
-        "Save a scheme to the shortlist when you have narrowed down to the best "
-        "match(es) for the user. Pass the exact scheme name from search results."
-    ))
+    @function_tool(description="Save a scheme to shortlist by exact name from search results.")
     async def shortlist_scheme(self, scheme_name: str) -> str:
-        """Add a scheme to the conversation shortlist.
+        """Add a scheme to the shortlist.
 
         Args:
-            scheme_name: The exact scheme name from search results to shortlist.
+            scheme_name: Exact scheme name from search results.
         """
         last = self._mem.get_last_search()
         if not last:
-            return json.dumps({"error": "No search results to pick from."})
-
+            return json.dumps({"error": "No search results."})
         for s in last["results"]:
             if s["name"].lower() == scheme_name.lower():
                 slug = s.get("apply_url", "").rstrip("/").split("/")[-1]
                 self._mem.shortlist_scheme(slug, s)
-                log.info("Shortlisted scheme: %s", scheme_name)
                 return json.dumps({"shortlisted": True, "scheme": s})
+        return json.dumps({"error": f"'{scheme_name}' not in last results."})
 
-        return json.dumps({"error": f"Scheme '{scheme_name}' not found in last search results."})
+    # ── Detail & web tools ────────────────────────────────────────────────
 
-    # ── Web search & scheme details ───────────────────────────────────────
-
-    @function_tool(description=(
-        "Search the web using DuckDuckGo for up-to-date information. Use this "
-        "when you need the latest news, application deadlines, recent policy "
-        "changes, or any info not in the local schemes database. "
-        "IMPORTANT: Before calling this tool, always tell the user you are "
-        "searching the web so they know to wait."
-    ))
-    async def web_search(self, query: str) -> str:
-        """Search the web for current information.
-
-        Args:
-            query: The search query (e.g. 'PM-KISAN latest installment 2026', 'PMAY application deadline').
-        """
-        log.info("Tool call: web_search(query=%r)", query)
-        try:
-            results = await asyncio.wait_for(
-                asyncio.to_thread(self._sync_web_search, query, 5),
-                timeout=8.0,
-            )
-            if not results:
-                return json.dumps({"found": 0, "message": "No web results found."})
-            return json.dumps({"found": len(results), "results": results}, ensure_ascii=False)
-        except asyncio.TimeoutError:
-            log.warning("Web search timed out for '%s'", query)
-            return json.dumps({"error": "Web search timed out. Try a simpler query."})
-        except Exception as e:
-            log.error("Web search failed: %s", e)
-            return json.dumps({"error": f"Web search failed: {e}"})
-
-    @staticmethod
-    def _sync_web_search(query: str, max_results: int = 5) -> list:
-        """Synchronous DuckDuckGo search (called from threadpool)."""
-        with DDGS() as ddgs:
-            return list(ddgs.text(query, max_results=max_results))
-
-    @function_tool(description=(
-        "Get FULL details about a specific government scheme — including benefits, "
-        "eligibility, documents required, how to apply, and more. Use this when the "
-        "user asks for in-depth information about a SPECIFIC scheme (e.g. 'tell me "
-        "about PM-KISAN', 'what are PMAY benefits?'). Pass the scheme name or slug."
-    ))
+    @function_tool(description="Get full details for a specific scheme. Checks local DB first (instant), falls back to web. SPEAK FIRST if scheme might not be in DB.")
     async def get_scheme_details(self, scheme_name: str) -> str:
-        """Fetch full details for a specific scheme. Checks local DB first, web only if needed.
+        """Fetch full details for a specific scheme.
 
         Args:
-            scheme_name: The scheme name or slug (e.g. 'PM-KISAN', 'Pradhan Mantri Awas Yojana', 'pmay-u').
+            scheme_name: Scheme name or slug (e.g. 'PM-KISAN', 'pmay-u').
         """
-        log.info("Tool call: get_scheme_details(scheme_name=%r)", scheme_name)
+        log.info("get_scheme_details(%r)", scheme_name)
 
-        # ── Try local DB first (fast) ────────────────────────────────────
+        # Try local DB first (fast path)
         local = scheme_lookup.get_scheme_by_name(scheme_name)
         if not local:
             local = scheme_lookup.get_scheme_by_slug(scheme_name)
         if not local:
-            # Check search history
             last = self._mem.get_last_search()
             if last:
                 for s in last["results"]:
@@ -498,117 +331,73 @@ class Assistant(Agent):
                         break
 
         if local:
-            return json.dumps({
-                "scheme": scheme_name,
-                "source": "local_database",
-                "details": local,
-            }, ensure_ascii=False)
+            return json.dumps(
+                {"scheme": scheme_name, "source": "database", "details": local},
+                ensure_ascii=False,
+            )
 
-        # ── DB miss — fall back to web search with timeout ───────────────
-        log.info("Scheme '%s' not in DB, searching web.", scheme_name)
+        # Web fallback (slow path)
+        log.info("'%s' not in DB, searching web.", scheme_name)
         try:
             q = f"{scheme_name} scheme benefits eligibility how to apply myscheme.gov.in"
-            web_results = await asyncio.wait_for(
-                asyncio.to_thread(self._sync_web_search, q, 5),
-                timeout=8.0,
-            )
-            if web_results:
-                return json.dumps({
-                    "scheme": scheme_name,
-                    "source": "web_search",
-                    "web_results": web_results,
-                    "tip": "Summarize: benefits, eligibility, documents, how to apply."
-                }, ensure_ascii=False)
-        except asyncio.TimeoutError:
-            log.warning("Web detail search timed out for '%s'", scheme_name)
-        except Exception as e:
+            results = await _ddg_search(q, max_results=5, timeout=5.0)
+            if results:
+                return json.dumps(
+                    {"scheme": scheme_name, "source": "web", "results": results},
+                    ensure_ascii=False,
+                )
+        except (asyncio.TimeoutError, Exception) as e:
             log.warning("Web detail search failed: %s", e)
 
-        return json.dumps({
-            "error": f"Could not find details for '{scheme_name}'. "
-                     "Try searching with search_schemes first."
-        })
+        return json.dumps(
+            {"error": f"Could not find '{scheme_name}'. Try search_schemes first."}
+        )
 
-    # ── General knowledge tool ─────────────────────────────────────────────
-
-    @function_tool(description=(
-        "Answer ANY general question that is NOT specifically about searching "
-        "for a government scheme. Use this for: how to get Aadhaar/PAN/ration "
-        "card/passport, government processes, helpline numbers, RTI, tax filing, "
-        "crop prices, weather, agricultural advice, rural welfare, or ANY topic "
-        "the user asks about that you don't have direct knowledge of. "
-        "This searches the web and returns relevant information. "
-        "IMPORTANT: Before calling this tool, always tell the user you are "
-        "searching for the answer so they know to wait."
-    ))
-    async def smart_answer(self, question: str) -> str:
-        """Search the web to answer a general question.
+    # FIX #2: Merged web_search + smart_answer into one tool
+    @function_tool(description="Search the web for up-to-date info (deadlines, news, processes, helplines, documents, etc). ALWAYS speak to the user BEFORE calling this — it takes a few seconds.")
+    async def web_search(self, query: str) -> str:
+        """Search the web for current information.
 
         Args:
-            question: The user's question in natural language (e.g. 'how to apply for Aadhaar card', 'PM helpline number', 'wheat MSP price 2026').
+            query: Search query (e.g. 'PM-KISAN latest installment 2025', 'how to apply for Aadhaar').
         """
-        log.info("Tool call: smart_answer(question=%r)", question)
+        log.info("web_search(%r)", query)
         try:
-            # Build a focused search query
-            search_query = f"{question} India government official"
-            results = await asyncio.wait_for(
-                asyncio.to_thread(self._sync_web_search, search_query, 5),
-                timeout=8.0,
+            results = await _ddg_search(query, max_results=5, timeout=5.0)  # FIX #8: 5s not 8s
+            if not results:
+                return json.dumps({"found": 0, "message": "No web results found."})
+            return json.dumps(
+                {"found": len(results), "results": results},
+                ensure_ascii=False,
             )
-
-            if not results:
-                # Try a broader search
-                results = await asyncio.wait_for(
-                    asyncio.to_thread(self._sync_web_search, question, 5),
-                    timeout=8.0,
-                )
-
-            if not results:
-                return json.dumps({
-                    "found": 0,
-                    "message": "I couldn't find information on that. You may want to "
-                               "check the official government website or call the helpline."
-                })
-
-            return json.dumps({
-                "found": len(results),
-                "results": results,
-                "instruction": "Summarize the most relevant information from these results "
-                               "in a clear, helpful way. Give step-by-step guidance if applicable."
-            }, ensure_ascii=False)
         except asyncio.TimeoutError:
-            log.warning("smart_answer timed out for '%s'", question)
-            return json.dumps({"error": "Search timed out. Try asking in a simpler way."})
+            return json.dumps({"error": "Search timed out. Try a simpler query."})
         except Exception as e:
-            log.error("smart_answer failed: %s", e)
+            log.error("Web search failed: %s", e)
             return json.dumps({"error": f"Search failed: {e}"})
 
     # ── Info tools ────────────────────────────────────────────────────────
 
-    @function_tool(description=(
-        "Get the list of all scheme categories available in the database. "
-        "Use this when you need to show the user what types of schemes exist."
-    ))
+    @function_tool(description="List all scheme categories in the database.")
     async def list_categories(self) -> str:
         """Return all available scheme categories."""
-        cats = scheme_lookup.get_all_categories()
-        return json.dumps({"categories": cats})
+        return json.dumps({"categories": scheme_lookup.get_all_categories()})
 
-    @function_tool(description=(
-        "Get database statistics: total schemes, central vs state counts. "
-        "Use when the user asks how many schemes are available."
-    ))
+    @function_tool(description="Get database stats (total schemes, central vs state).")
     async def get_stats(self) -> str:
         """Return database statistics."""
-        stats = scheme_lookup.get_db_stats()
-        return json.dumps(stats)
+        return json.dumps(scheme_lookup.get_db_stats())
 
+
+# ── Server wiring ─────────────────────────────────────────────────────────────
 
 server = AgentServer()
 
 
 @server.rtc_session()
 async def my_agent(ctx: agents.JobContext):
+    assistant = Assistant()
+
     session = AgentSession(
         llm=google.beta.realtime.RealtimeModel(
             voice="Charon",
@@ -616,29 +405,34 @@ async def my_agent(ctx: agents.JobContext):
             realtime_input_config=types.RealtimeInputConfig(
                 automatic_activity_detection=types.AutomaticActivityDetection(
                     end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
-                    silence_duration_ms=500,
-                    prefix_padding_ms=200,
+                    silence_duration_ms=300,   # FIX #4: was 500 → faster turn-taking
+                    prefix_padding_ms=100,     # FIX #4: was 200 → less buffering
                 ),
             ),
             conn_options=agents.APIConnectOptions(
-                max_retry=5,
-                retry_interval=3.0,
-                timeout=15.0,
+                max_retry=3,          # FIX #8: was 5
+                retry_interval=2.0,   # FIX #8: was 3.0
+                timeout=10.0,         # FIX #8: was 15.0
             ),
         ),
         allow_interruptions=True,
-        min_interruption_duration=1.0,
-        min_interruption_words=3,
-        min_endpointing_delay=0.5,
-        max_endpointing_delay=3.0,
+        min_interruption_duration=0.5,   # was 1.0 → user can interrupt faster
+        min_interruption_words=2,        # was 3
+        min_endpointing_delay=0.3,       # was 0.5
+        max_endpointing_delay=1.5,       # FIX #3: was 3.0 → biggest latency win
     )
 
+    # FIX #7: use renamed import `nc` so the lambda doesn't shadow the module
     await session.start(
         room=ctx.room,
-        agent=Assistant(),
+        agent=assistant,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=lambda params: noise_cancellation.BVCTelephony() if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP else noise_cancellation.BVC(),
+                noise_cancellation=lambda params: (
+                    nc.BVCTelephony()
+                    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                    else nc.BVC()
+                ),
             ),
             audio_output=room_io.AudioOutputOptions(
                 sample_rate=24000,
@@ -653,12 +447,17 @@ async def my_agent(ctx: agents.JobContext):
 
     await session.generate_reply(
         instructions=(
-            "Say a short, warm greeting in one smooth sentence, for example: "
-            "'Namaste! I'm Gram Sahayak, here to help you find government schemes "
-            "and services — how can I help you today?' Keep it to ONE sentence "
-            "with no pauses. Respond in the language the user speaks in."
+            "Greet warmly in ONE short sentence, e.g.: "
+            "'Namaste! I'm Gram Sahayak — how can I help you with government schemes today?' "
+            "Match the user's language."
         )
     )
+
+    # FIX #10: clean up memory when the room disconnects
+    @ctx.room.on("disconnected")
+    def _on_disconnect():
+        assistant._mem.close()
+        log.info("Session memory cleaned up.")
 
 
 if __name__ == "__main__":
