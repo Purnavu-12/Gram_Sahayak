@@ -1,400 +1,175 @@
-# Gram Sahayak (ग्राम सहायक)
+<div align="center">
 
-**Rural Digital Assistance Platform for Government Schemes**
+# 🌾 Gram Sahayak (ग्राम सहायक)
 
-Gram Sahayak is a voice-first web application that helps low-literacy rural Indian citizens discover and understand government welfare schemes through natural conversation. Built with simplicity and accessibility at its core.
+### _Rural Digital Assistance Platform for Government Schemes_
 
-## 🌟 Features
+[![Frontend](https://img.shields.io/badge/Frontend-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://vercel.com)
+[![Backend](https://img.shields.io/badge/Backend-AWS%20EC2-FF9900?style=for-the-badge&logo=amazonec2&logoColor=white)](https://aws.amazon.com/ec2/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://react.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-3.4-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)](https://tailwindcss.com)
+[![License](https://img.shields.io/badge/License-ISC-green?style=for-the-badge)](LICENSE)
 
-- **Voice-First Interface**: Speak naturally in Hindi or English via LiveKit voice agent
-- **Real Scheme Database**: Access to 700+ government schemes from myscheme.gov.in
-- **Smart Search**: Full-text search across scheme names, descriptions, categories, and tags
-- **Smart Scheme Matching**: AI-powered matching based on user profile
-- **Simple & Accessible**: Designed for low-literacy users with large text and icons
-- **Mobile-First**: Optimized for low-end Android phones (320px+ screens)
-- **Bilingual**: Full support for Hindi and English
-- **Offline-Ready**: Works with cached data when internet is unavailable
+**Gram Sahayak** is a voice-first web application that helps rural Indian citizens discover and understand **700+ government welfare schemes** through natural voice conversation. Designed for low-literacy users with large text, icons, and multilingual support across **8 Indian languages**.
+
+[Report Bug](https://github.com/Purnavu-12/Gram_Sahayak/issues) · [Request Feature](https://github.com/Purnavu-12/Gram_Sahayak/issues)
+
+</div>
+
+---
+
+## ✨ Key Features
+
+- 🎙️ **Voice-First Interface** — Speak naturally in Hindi or English via LiveKit-powered voice agent
+- 📊 **700+ Government Schemes** — Real database sourced from myscheme.gov.in with full-text search
+- 🔍 **Smart Search & Filtering** — Keyword search across name, ministry, tags, etc. plus filters for state, category, and level
+- 🤖 **AI-Powered Matching** — Google Gemini recommends relevant schemes based on user needs
+- 🌐 **8 Languages** — English, Hindi, Bengali, Gujarati, Kannada, Marathi, Tamil, Telugu
+- 📱 **Mobile-First** — Optimized for 320px+ screens and low-end Android devices
+- ♿ **Accessible UI** — Large fonts (16px+), icon + text labels, WCAG AA contrast
+
+---
 
 ## 🏗️ Architecture
 
-Gram Sahayak consists of two main components:
+| Layer | Platform | What it runs |
+|-------|----------|-------------|
+| **Frontend** | Vercel | React 19 + TypeScript + Vite + Tailwind CSS |
+| **Backend** | AWS EC2 | Python token server (port 8081) + LiveKit voice agent |
+| **Database** | AWS EC2 | SQLite with FTS5 (700+ schemes) |
+| **Voice** | LiveKit Cloud | Real-time WebRTC (STT / TTS) |
+| **LLM** | Google Gemini | Natural language understanding |
 
-### 1. React Frontend (Web Application)
-- **Purpose**: User interface for browsing and searching schemes
-- **Tech**: React 19 + TypeScript + Vite + Tailwind CSS
-- **Database**: SQLite (schemes.db) loaded directly in browser via sql.js
-- **Features**: Search, filter, scheme details, bilingual support
+**Flow:** User → Vercel (React SPA) → `/api` proxy → AWS EC2 (token server + voice agent + SQLite)
 
-### 2. Python Backend (Voice Agent)
-- **Purpose**: Voice-based conversational interface using LiveKit
-- **Tech**: LiveKit Agents + Google Gemini AI + DuckDuckGo Search
-- **Features**: Voice recognition, natural conversation, web scraping, scheme recommendations
-- **Note**: Runs separately from React frontend
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- **For Frontend**:
-  - Node.js 18+ and npm
-  - Modern web browser
-
-- **For Voice Agent** (optional):
-  - Python 3.7+
-  - LiveKit server (Cloud or self-hosted)
-  - Google AI API key
-
-### Frontend Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/Purnavu-12/Gram_Sahayak.git
-cd Gram_Sahayak
-
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-```
-
-The application will be available at `http://localhost:3000`
-
-### Frontend Build for Production
-
-```bash
-npm run build
-npm run preview
-```
-
-## 🎙️ Voice Agent Setup (Optional)
-
-The voice agent runs separately and uses LiveKit for real-time voice communication.
-
-### 1. Install Python Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Configure Environment Variables
-
-Copy `.env.example` to `.env` and fill in your API keys:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env`:
-
-```bash
-# LiveKit Configuration
-LIVEKIT_URL=wss://your-livekit-server.com
-LIVEKIT_API_KEY=your_livekit_api_key
-LIVEKIT_API_SECRET=your_livekit_api_secret
-
-# Google AI API Key (for Gemini)
-GOOGLE_API_KEY=your_google_api_key
-
-# Optional: MyScheme.gov.in API Key (only needed for database sync)
-# The voice agent uses DuckDuckGo webscraping for real-time scheme details
-MYSCHEME_API_KEY=your_api_key_here
-```
-
-### 3. Initialize/Update Schemes Database (Optional)
-
-The database can be synced from myscheme.gov.in API (requires API key):
-
-```bash
-# Run once to sync database
-python schemes_agent.py
-
-# Run continuously (syncs every hour)
-python schemes_agent.py --daemon
-
-# View database statistics
-python schemes_agent.py --stats
-```
-
-### 4. Run the Voice Agent
-
-```bash
-# Terminal 1 — Token server (generates JWT tokens for frontend → LiveKit)
-python token_server.py
-
-# Terminal 2 — LiveKit voice agent
-python agent.py
-```
-
-The voice agent will:
-- Connect to your LiveKit server
-- Use Google Gemini for natural language understanding
-- Search schemes in the local SQLite database
-- **Use DuckDuckGo webscraping** to fetch latest scheme details from the web (no API key required)
-- Maintain conversation context per user session
-
-**Note**: The voice agent does NOT require myscheme.gov.in API key for operation. It uses DuckDuckGo search to scrape real-time scheme information directly from the web.
+---
 
 ## 🛠️ Tech Stack
 
+**Frontend:** React 19 · TypeScript 5.9 · Vite 7 · Tailwind CSS 3.4 · LiveKit Client
+
+**Backend:** Python 3.10+ · LiveKit Agents · Google Gemini · SQLite 3 (FTS5) · DuckDuckGo Search
+
+**Deployment:** Vercel (frontend) · AWS EC2 (backend) · LiveKit Cloud (voice)
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Frontend:** Node.js 18+, npm
+- **Backend:** Python 3.10+, pip
+
 ### Frontend
-- **Framework**: React 19 with TypeScript
-- **Build Tool**: Vite 7
-- **Styling**: Tailwind CSS 3
-- **Database**: sql.js (SQLite in browser)
-- **Voice Integration**: LiveKit Client (for voice UI)
-- **State Management**: React Context API
-- **Storage**: Browser LocalStorage & SessionStorage
 
-### Backend (Voice Agent)
-- **Framework**: LiveKit Agents
-- **LLM**: Google Gemini (via LiveKit Google plugin)
-- **Voice**: Text-to-Speech and Speech-to-Text via LiveKit
-- **Database**: SQLite 3 with FTS5 (Full-Text Search)
-- **Web Search**: DuckDuckGo Search API (ddgs)
-- **Conversation Memory**: In-memory SQLite per session
-- **Noise Cancellation**: LiveKit BVC/Telephony plugins
+```bash
+git clone https://github.com/Purnavu-12/Gram_Sahayak.git
+cd Gram_Sahayak
+npm install
+npm run dev          # → http://localhost:3000
+```
 
-### Data Sources
-- **Database**: Pre-built SQLite database with 700+ schemes (can be synced from myscheme.gov.in API if you have an API key)
-- **Real-time Updates**: DuckDuckGo webscraping for latest scheme information (no API key needed)
-- **Voice Agent**: Uses DuckDuckGo exclusively for up-to-date scheme details
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start dev server |
+| `npm run build` | Type-check + production build |
+| `npm run preview` | Preview production build |
+| `npm run lint` | TypeScript type checking |
+
+### Backend (AWS EC2)
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env   # fill in your keys
+python token_server.py  # Terminal 1 — API + JWT tokens
+python agent.py         # Terminal 2 — Voice agent
+```
+
+---
+
+## 🌐 Deployment
+
+### Frontend — Vercel
+
+1. Connect the GitHub repo to [Vercel](https://vercel.com)
+2. Vercel auto-detects the Vite framework
+3. API calls are proxied to EC2 via serverless functions in `api/`
+
+### Backend — AWS EC2
+
+1. Launch an EC2 instance (Ubuntu 22.04, `t3.medium` recommended)
+2. Install Python 3.10+, clone the repo, install dependencies
+3. Configure `.env` with LiveKit + Google AI credentials
+4. Run `token_server.py` and `agent.py` (use systemd for production)
+
+---
+
+## 🔑 Environment Variables
+
+Copy `.env.example` → `.env` and fill in your values:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `LIVEKIT_URL` | Yes | LiveKit server WebSocket URL |
+| `LIVEKIT_API_KEY` | Yes | LiveKit API key |
+| `LIVEKIT_API_SECRET` | Yes | LiveKit API secret |
+| `GOOGLE_API_KEY` | Yes | Google AI API key (Gemini) |
+| `TOKEN_SERVER_PORT` | No | Token server port (default: `8081`) |
+| `DB_PATH` | No | SQLite database path (default: `./schemes.db`) |
+| `EC2_BACKEND_URL` | Yes (Vercel) | Base URL of the AWS EC2 backend for `/api/*` proxy requests (set in your Vercel project Environment Variables to avoid using the hardcoded fallback URL). |
+
+---
 
 ## 📁 Project Structure
 
 ```
 Gram_Sahayak/
-├── src/                          # React frontend source
-│   ├── components/               # Reusable UI components
-│   │   ├── common/               # Buttons, Cards, etc.
-│   │   ├── layout/               # Header, Footer
-│   │   └── features/             # Feature-specific components
-│   ├── pages/                    # Page components
-│   ├── services/                 # Business logic & API calls
-│   │   ├── schemeData.ts         # Scheme service wrapper
-│   │   └── schemeDatabase.ts     # SQLite database service
-│   ├── types/                    # TypeScript type definitions
-│   ├── i18n/                     # Hindi & English translations
-│   ├── styles/                   # Global styles
-│   └── main.tsx                  # Entry point
-├── public/                       # Static assets
-│   └── schemes.db                # SQLite database (5.3MB, 700+ schemes)
-├── agent.py                      # LiveKit voice agent
-├── scheme_lookup.py              # Database query interface
-├── schemes_agent.py              # myscheme.gov.in sync agent
-├── schemes.db                    # SQLite database (used by Python backend)
-├── .kiro/specs/                  # Design documents & requirements
-├── .env.example                  # Environment variables template
-├── requirements.txt              # Python dependencies
-└── package.json                  # Node.js dependencies
+├── src/                     # React frontend
+│   ├── components/          #   UI components (common, features, layout)
+│   ├── pages/               #   Page components (Home)
+│   ├── services/            #   API & voice services
+│   ├── i18n/                #   Translation files (8 languages)
+│   ├── types/               #   TypeScript types
+│   └── styles/              #   Global CSS
+├── api/                     # Vercel serverless proxy
+├── agent.py                 # LiveKit voice agent
+├── token_server.py          # JWT token server + scheme API
+├── scheme_lookup.py         # SQLite query interface
+├── schemes_agent.py         # Database sync agent
+├── schemes.db               # SQLite database (700+ schemes)
+├── vercel.json              # Vercel deployment config
+├── .env.example             # Environment variables template
+└── requirements.txt         # Python dependencies
 ```
 
-## 🎨 Design Principles
-
-### Color Palette
-- **Primary Green**: `#2E7D32` - Trust, nature (suits rural theme)
-- **Secondary Saffron**: `#FF6F00` - Energy, warmth (Indian flag)
-- **Background**: `#FAFAF7` - Off-white, easy on eyes
-- **Surface**: `#FFFFFF`
-- **Text Primary**: `#1A1A1A`
-- **Text Secondary**: `#555555`
-- **Success**: `#388E3C`
-- **Error**: `#D32F2F`
-- **Warning**: `#F57C00`
-
-### Typography
-- **Font Family**: Noto Sans (Hindi support), Inter (English)
-- **Minimum Font Size**: 16px (for low-literacy users)
-- **Large Touch Targets**: 44x44px minimum for mobile
-- **Font Weights**: 400 (regular), 600 (semibold), 700 (bold)
-
-### Responsive Breakpoints
-- **Mobile**: 320px - 640px (default/primary)
-- **Tablet**: 640px - 1024px
-- **Desktop**: 1024px+
-
-## 🌐 Internationalization (i18n)
-
-The app supports Hindi and English with a language toggle in the header.
-
-### Adding New Translations
-
-1. Add keys to `src/i18n/en.json`:
-```json
-{
-  "newKey": "English text"
-}
-```
-
-2. Add corresponding Hindi translation to `src/i18n/hi.json`:
-```json
-{
-  "newKey": "हिंदी पाठ"
-}
-```
-
-3. Use in components:
-```tsx
-const { t } = useLanguage();
-return <p>{t('newKey')}</p>;
-```
-
-## 📊 Database Schema
-
-### schemes table
-- `id` - Elastic ID from API
-- `slug` - URL-friendly identifier (used as primary key in frontend)
-- `scheme_name` - Full scheme name
-- `scheme_short_title` - Short title
-- `brief_description` - Brief description
-- `nodal_ministry_name` - Ministry responsible
-- `level` - Central / State
-- `scheme_for` - Individual / Organization
-- `beneficiary_states` - JSON array of states
-- `scheme_categories` - JSON array of categories
-- `tags` - JSON array of tags
-- `url` - Official myscheme.gov.in URL
-- `first_seen_at`, `last_seen_at`, `updated_at` - Timestamps
-
-### schemes_fts table
-- FTS5 virtual table for full-text search
-- Automatically synchronized via triggers
-
-## 🔒 Security
-
-- **API Keys**: Never commit API keys to Git. Use `.env` file (gitignored)
-- **Environment Variables**: All sensitive config in `.env` (see `.env.example`)
-- **CORS**: Configure properly for production deployment
-- **Input Validation**: User inputs sanitized before database queries
-- **SQL Injection**: Protected by parameterized queries in both Python and JavaScript
-
-## 🧪 Development
-
-### Linting
-```bash
-npm run lint  # TypeScript type checking
-```
-
-### Building
-```bash
-npm run build  # Builds to /dist directory
-```
-
-### Testing Voice Agent
-```bash
-# View database stats
-python schemes_agent.py --stats
-
-# Test scheme lookup
-python -c "import scheme_lookup; print(scheme_lookup.search_schemes('farmer'))"
-```
-
-## 🗺️ Roadmap
-
-### Phase 1: Core Features ✅
-- [x] Project setup
-- [x] Basic UI components
-- [x] Landing page with voice button
-- [x] Real scheme database integration (700+ schemes)
-- [x] Search and filter functionality
-- [x] Complete i18n coverage
-
-### Phase 2: Voice Integration (In Progress)
-- [x] Python voice agent with LiveKit
-- [x] Speech-to-text and text-to-speech
-- [x] Conversation manager with context
-- [ ] Frontend LiveKit integration
-- [ ] User profile collection flow
-
-### Phase 3: Enhanced Features
-- [ ] Scheme recommendation algorithm
-- [ ] Eligibility verification
-- [ ] Application guidance
-- [ ] Saved schemes/favorites
-- [ ] User authentication
-
-### Phase 4: Production Ready
-- [ ] Performance optimization
-- [ ] Full accessibility audit (WCAG AA)
-- [ ] Security hardening
-- [ ] CI/CD pipeline
-- [ ] Deployment (Vercel/Netlify frontend + Railway/Render backend)
-
-## 📖 Documentation
-
-- [Requirements](/.kiro/specs/gram-sahayak-prototype/requirements.md) - Detailed functional requirements
-- [Design Document](/.kiro/specs/gram-sahayak-prototype/design.md) - Architecture and design decisions
-- [Agent Instructions](/AGENTS.md) - Guidelines for AI agents/developers
-- [Environment Variables](/.env.example) - Configuration template
+---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please follow these steps:
+1. Fork the repo
+2. Create a feature branch: `git checkout -b feat/your-feature`
+3. Commit changes: `git commit -m 'feat: add your feature'`
+4. Push and open a Pull Request
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feat/amazing-feature`)
-3. Make your changes
-4. Run linting: `npm run lint`
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feat/amazing-feature`)
-7. Open a Pull Request
-
-### Code Standards
-
-- Use TypeScript for type safety
-- Follow mobile-first responsive design
-- Ensure accessibility (WCAG AA minimum)
-- Add i18n for all user-facing text (both Hindi and English)
-- Keep bundle size under 200KB for initial load (for rural internet)
-- Use existing Tailwind classes before adding custom CSS
-- Add comments for complex logic
-- Test on mobile viewport (minimum 320px width)
-
-## 🐛 Known Issues
-
-1. **Database Loading**: First load may take 2-3 seconds (5.3MB database download)
-2. **Voice Agent**: Requires separate LiveKit server setup (not included)
-3. **Hindi Translations**: Some scheme data from API is English-only
-
-## 📝 Environment Variables Reference
-
-See `.env.example` for a complete list. Key variables:
-
-- `MYSCHEME_API_KEY` - (Optional) API key for myscheme.gov.in database sync. Not needed for voice agent operation, which uses DuckDuckGo webscraping instead.
-- `LIVEKIT_URL` - Your LiveKit server URL
-- `LIVEKIT_API_KEY` - LiveKit API key
-- `LIVEKIT_API_SECRET` - LiveKit API secret
-- `GOOGLE_API_KEY` - Google AI API key for Gemini
-- `DB_PATH` - Path to SQLite database (default: ./schemes.db)
-- `SYNC_INTERVAL_HOURS` - How often to sync database (default: 1)
+---
 
 ## 📄 License
 
 ISC License
 
-## 👥 Authors
-
-Built with ❤️ for rural India
-
 ---
 
 ## 🙏 Acknowledgments
 
-- **myscheme.gov.in** - For providing the government schemes API
-- **LiveKit** - For real-time voice communication infrastructure
-- **Google Gemini** - For natural language understanding
-- **DuckDuckGo** - For web search capabilities
+[myscheme.gov.in](https://www.myscheme.gov.in/) · [LiveKit](https://livekit.io) · [Google Gemini](https://ai.google.dev/) · [DuckDuckGo](https://duckduckgo.com) · [Vercel](https://vercel.com) · [AWS](https://aws.amazon.com)
 
 ---
 
-**Note**: The voice agent component is functional but requires external LiveKit server setup. The React frontend works standalone with the embedded schemes database.
+<div align="center">
 
-## 📞 Support
+**Made with ❤️ for Rural India 🇮🇳 | ग्रामीण भारत के लिए बनाया गया**
 
-For issues or questions:
-- GitHub Issues: https://github.com/Purnavu-12/Gram_Sahayak/issues
-- Documentation: See `/docs` folder
-
----
-
-**Made for rural India 🇮🇳 | ग्रामीण भारत के लिए बनाया गया**
+</div>
