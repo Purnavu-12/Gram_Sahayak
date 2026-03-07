@@ -24,7 +24,7 @@
 
 - 🎙️ **Voice-First Interface** — Speak naturally in Hindi or English via LiveKit-powered voice agent
 - 📊 **700+ Government Schemes** — Real database sourced from myscheme.gov.in with full-text search
-- 🔍 **Smart Search & Filtering** — Search by name, category, state, ministry, or tags
+- 🔍 **Smart Search & Filtering** — Keyword search across name, ministry, tags, etc. plus filters for state, category, and level
 - 🤖 **AI-Powered Matching** — Google Gemini recommends relevant schemes based on user needs
 - 🌐 **8 Languages** — English, Hindi, Bengali, Gujarati, Kannada, Marathi, Tamil, Telugu
 - 📱 **Mobile-First** — Optimized for 320px+ screens and low-end Android devices
@@ -119,6 +119,7 @@ Copy `.env.example` → `.env` and fill in your values:
 | `GOOGLE_API_KEY` | Yes | Google AI API key (Gemini) |
 | `TOKEN_SERVER_PORT` | No | Token server port (default: `8081`) |
 | `DB_PATH` | No | SQLite database path (default: `./schemes.db`) |
+| `EC2_BACKEND_URL` | Yes (Vercel) | Base URL of the AWS EC2 backend for `/api/*` proxy requests (set in your Vercel project Environment Variables to avoid using the hardcoded fallback URL). |
 
 ---
 
